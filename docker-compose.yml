@@ -1,0 +1,8 @@
+services:
+  vidmagik-mcp:
+    build: .
+    stdin_open: true
+    volumes:
+      - ./media:/app/media
+    environment:
+      - PYTHONUNBUFFERED=1
