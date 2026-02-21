@@ -8,6 +8,7 @@ from moviepy.video.tools.credits import CreditsClip
 import os
 import uuid
 import base64
+import gzip
 import numpy as np
 import numexpr
 from custom_fx import *
@@ -801,10 +802,13 @@ def read_file_base64(filename: str) -> str:
     return base64.b64encode(data).decode("utf-8")
 
 @mcp.tool
-def write_file_base64(filename: str, data: str) -> str:
-    """Write a base64-encoded string to a file. Use this to upload files to the server."""
+def write_file_base64(filename: str, data: str, compressed: bool = False) -> str:
+    """Write a base64-encoded string to a file. Use this to upload files to the server.
+    If compressed=True, the data is expected to be gzip-compressed before base64 encoding."""
     filename = validate_path(filename)
     file_data = base64.b64decode(data)
+    if compressed:
+        file_data = gzip.decompress(file_data)
     with open(filename, "wb") as f:
         f.write(file_data)
     return f"Successfully wrote {len(file_data)} bytes to {filename}"
