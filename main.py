@@ -6,16 +6,15 @@ from moviepy.video.io.ffmpeg_tools import ffmpeg_extract_subclip
 from moviepy.video.tools.subtitles import file_to_subtitles, SubtitlesClip
 from moviepy.video.tools.credits import CreditsClip
 import os
+import shutil
 import uuid
-import base64
-import gzip
 import numpy as np
 import numexpr
 from custom_fx import *
 import argparse
 import sys
 
-mcp = FastMCP("moviepy-mcp")
+mcp = FastMCP("vidmagik-mcp")
 
 CLIPS = {}
 MAX_CLIPS = 100
@@ -791,27 +790,7 @@ def write_gif(
     )
     return f"Successfully wrote GIF to {filename}"
 
-@mcp.tool
-def read_file_base64(filename: str) -> str:
-    """Read a file and return its contents as a base64-encoded string. Use this to download generated files."""
-    filename = validate_path(filename)
-    if not os.path.exists(filename):
-        raise FileNotFoundError(f"File {filename} not found.")
-    with open(filename, "rb") as f:
-        data = f.read()
-    return base64.b64encode(data).decode("utf-8")
 
-@mcp.tool
-def write_file_base64(filename: str, data: str, compressed: bool = False) -> str:
-    """Write a base64-encoded string to a file. Use this to upload files to the server.
-    If compressed=True, the data is expected to be gzip-compressed before base64 encoding."""
-    filename = validate_path(filename)
-    file_data = base64.b64decode(data)
-    if compressed:
-        file_data = gzip.decompress(file_data)
-    with open(filename, "wb") as f:
-        f.write(file_data)
-    return f"Successfully wrote {len(file_data)} bytes to {filename}"
 
 @mcp.tool
 def tools_find_audio_period(clip_id: str) -> float:
@@ -946,8 +925,44 @@ def demonstrate_kaleidoscope_cube(
         f"in the {cube_direction} direction. Then, save the resulting video as 'kaleidoscope_cube_demo.mp4'."
     )
 
+# --- Custom HTTP Routes ---
+
+from starlette.requests import Request
+from starlette.responses import JSONResponse
+
+@mcp.custom_route("/upload", methods=["POST"])
+async def handle_upload(request: Request):
+    """Accept raw file uploads via multipart/form-data.
+    
+    Upload files directly without base64 encoding.
+    The returned filename can be used with video_file_clip, image_clip, etc.
+    
+    Example:
+        curl -X POST http://localhost:8080/upload -F "file=@/path/to/video.mp4"
+    """
+    async with request.form() as form:
+        upload_file = form.get("file")
+        if upload_file is None:
+            return JSONResponse({"error": "No 'file' field in form data"}, status_code=400)
+        
+        filename = upload_file.filename
+        if not filename:
+            return JSONResponse({"error": "No filename provided"}, status_code=400)
+        
+        # Save to the server's working directory
+        dest_path = os.path.join(os.getcwd(), filename)
+        
+        with open(dest_path, "wb") as dest:
+            shutil.copyfileobj(upload_file.file, dest)
+    
+    return JSONResponse({
+        "filename": dest_path,
+        "size": os.path.getsize(dest_path),
+    })
+
+
 def parse_args(args=None):
-    parser = argparse.ArgumentParser(description="MoviePy MCP Server")
+    parser = argparse.ArgumentParser(description="vidMagik MCP Server")
     parser.add_argument("--transport", choices=["stdio", "sse", "http"], default="http", help="Transport type (default: http)")
     parser.add_argument("--host", default=os.getenv("HOST", "0.0.0.0"), help=f"Host for HTTP/SSE (default: {os.getenv('HOST', '0.0.0.0')})")
     parser.add_argument("--port", type=int, default=int(os.getenv("PORT", "8080")), help=f"Port for HTTP/SSE (default: {os.getenv('PORT', '8080')})")
