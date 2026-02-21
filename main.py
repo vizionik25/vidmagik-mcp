@@ -801,6 +801,15 @@ def read_file_base64(filename: str) -> str:
     return base64.b64encode(data).decode("utf-8")
 
 @mcp.tool
+def write_file_base64(filename: str, data: str) -> str:
+    """Write a base64-encoded string to a file. Use this to upload files to the server."""
+    filename = validate_path(filename)
+    file_data = base64.b64decode(data)
+    with open(filename, "wb") as f:
+        f.write(file_data)
+    return f"Successfully wrote {len(file_data)} bytes to {filename}"
+
+@mcp.tool
 def tools_find_audio_period(clip_id: str) -> float:
     """Find the period of the audio signal."""
     from moviepy.audio.tools.cuts import find_audio_period

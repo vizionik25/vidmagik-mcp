@@ -13,7 +13,7 @@ def cleanup():
     CLIPS.clear()
     yield
     CLIPS.clear()
-    for f in ["temp.mp4", "temp.wav", "test.png", "credits.txt", "sub.srt", "test.gif", "temp2.mp4"]:
+    for f in ["temp.mp4", "temp.wav", "test.png", "credits.txt", "sub.srt", "test.gif", "temp2.mp4", "test_b64_copy.gif"]:
         if os.path.exists(f):
             try: os.remove(f)
             except: pass
@@ -54,6 +54,13 @@ def test_io():
     tools_ffmpeg_extract_subclip.fn("temp.mp4", 0, 0.1, "temp2.mp4")
     with pytest.raises(ValueError): tools_ffmpeg_extract_subclip.fn("temp.mp4", 0.5, 0.1, "temp2.mp4")
     write_gif.fn(vid, "test.gif", fps=5)
+
+    # Round-trip base64 test
+    import base64
+    b64 = read_file_base64.fn("test.gif")
+    write_file_base64.fn("test_b64_copy.gif", b64)
+    b64_back = read_file_base64.fn("test_b64_copy.gif")
+    assert b64 == b64_back
 
 def test_audio_io():
     from moviepy import AudioClip

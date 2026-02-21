@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# Virtual environment
+.venv/
+
+# Generated media files
+*.gif
+*.mp4
+*.mp3
+*.wav
+*.webm
+*.avi
+*.mkv
+*.jpg
+*.jpeg
+*.png
+*.webp
+
+# Helper/test scripts
+decode_b64.py
+
+# OS
+.DS_Store
