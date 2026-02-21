@@ -7,6 +7,7 @@ from moviepy.video.tools.subtitles import file_to_subtitles, SubtitlesClip
 from moviepy.video.tools.credits import CreditsClip
 import os
 import uuid
+import base64
 import numpy as np
 import numexpr
 from custom_fx import *
@@ -788,6 +789,16 @@ def write_gif(
         loop=loop
     )
     return f"Successfully wrote GIF to {filename}"
+
+@mcp.tool
+def read_file_base64(filename: str) -> str:
+    """Read a file and return its contents as a base64-encoded string. Use this to download generated files."""
+    filename = validate_path(filename)
+    if not os.path.exists(filename):
+        raise FileNotFoundError(f"File {filename} not found.")
+    with open(filename, "rb") as f:
+        data = f.read()
+    return base64.b64encode(data).decode("utf-8")
 
 @mcp.tool
 def tools_find_audio_period(clip_id: str) -> float:
