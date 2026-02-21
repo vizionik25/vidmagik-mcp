@@ -19,6 +19,15 @@ __pycache__/
 *.jpeg
 *.png
 *.webp
+*.bmp
+*.tiff
+*.mov
+*.wmv
+*.flv
+*.m4a
+*.aac
+*.ogg
+*.flac
 
 # Helper/test scripts
 decode_b64.py

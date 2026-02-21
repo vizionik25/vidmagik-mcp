@@ -948,7 +948,7 @@ def demonstrate_kaleidoscope_cube(
 
 def parse_args(args=None):
     parser = argparse.ArgumentParser(description="MoviePy MCP Server")
-    parser.add_argument("--transport", choices=["stdio", "sse", "http"], default="stdio", help="Transport type (default: stdio)")
+    parser.add_argument("--transport", choices=["stdio", "sse", "http"], default="http", help="Transport type (default: http)")
     parser.add_argument("--host", default=os.getenv("HOST", "0.0.0.0"), help=f"Host for HTTP/SSE (default: {os.getenv('HOST', '0.0.0.0')})")
     parser.add_argument("--port", type=int, default=int(os.getenv("PORT", "8080")), help=f"Port for HTTP/SSE (default: {os.getenv('PORT', '8080')})")
     return parser.parse_args(args)
@@ -957,9 +957,13 @@ def main():
     args = parse_args()
     if args.transport == "stdio":
         mcp.run(transport="stdio")
+    elif args.transport == "http":
+        try:
+            mcp.run(transport="http", host=args.host, port=args.port)
+        except Exception as e:
+            print(f"HTTP transport failed: {e}. Falling back to SSE transport.")
+            mcp.run(transport="sse", host=args.host, port=args.port)
     else:
-        # For 'http' and 'sse', use the transport provided (SSE is often the actual transport for HTTP in FastMCP)
-        # If user explicitly asked for 'http', we use 'http' as requested.
         mcp.run(transport=args.transport, host=args.host, port=args.port)
 
 if __name__ == "__main__":
