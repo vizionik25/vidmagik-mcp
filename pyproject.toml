@@ -6,7 +6,7 @@ dependencies = [
     "fastmcp>=3.0.0",
     "moviepy>=2.2.1",
     "numexpr>=2.14.1",
-    "opencv-contrib-python>=4.13.0.92",
+    "opencv-contrib-python-headless>=4.13.0.92",
     "pytest>=9.0.2",
 ]
 
