@@ -1,0 +1,32 @@
+# fly.toml app configuration file generated for vidmagik-mcp on 2026-02-22T04:18:29-06:00
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
+
+app = 'vidmagik-mcp'
+primary_region = 'dfw'
+
+[build]
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ['app']
+
+  [http_service.http_options]
+    response_timeout = 300
+    idle_timeout = 300
+
+  [[http_service.http_options.replay_cache]]
+    path_prefix = "/mcp"
+    ttl_seconds = 3600
+    type = "header"
+    name = "mcp-session-id"
+
+[[vm]]
+  memory = '4gb'
+  cpus = 2
+  memory_mb = 4096

@@ -17,7 +17,7 @@ import sys
 mcp = FastMCP("vidmagik-mcp")
 
 CLIPS = {}
-MAX_CLIPS = 100
+MAX_CLIPS = 30
 
 # --- Clip Management ---
 
@@ -65,6 +65,29 @@ def delete_clip(clip_id: str) -> str:
         del CLIPS[clip_id]
         return f"Clip {clip_id} deleted."
     return f"Clip {clip_id} not found."
+
+@mcp.tool
+def purge_clips() -> str:
+    """Delete ALL clips currently loaded in memory and confirm the result.
+
+    Equivalent to calling list_clips, then delete_clip on every clip, then
+    list_clips again to verify. Returns a summary of what was removed.
+    """
+    before = list(CLIPS.keys())
+    if not before:
+        return "Memory was already empty — no clips to delete."
+
+    for clip_id in before:
+        try:
+            CLIPS[clip_id].close()
+        except Exception:
+            pass
+        del CLIPS[clip_id]
+
+    remaining = list(CLIPS.keys())
+    if remaining:
+        return f"Deleted {len(before)} clip(s), but {len(remaining)} still remain: {remaining}"
+    return f"Purged {len(before)} clip(s). Memory is now empty ✓"
 
 # --- Video IO ---
 
@@ -607,7 +630,9 @@ def vfx_clone_grid(clip_id: str, n_clones: int = 4) -> str:
 def vfx_rotating_cube(clip_id: str, speed: float = 45, direction: str = "horizontal", zoom: float = 1.0) -> str:
     """Simulates a 3D rotating cube effect with the video mapped to its faces."""
     clip = get_clip(clip_id)
-    return register_clip(clip.with_effects([RotatingCube(speed, direction, zoom)]))
+    speed_x = 0.0 if direction == "horizontal" else float(speed)
+    speed_y = float(speed) if direction == "horizontal" else 0.0
+    return register_clip(clip.with_effects([RotatingCube(speed_x=speed_x, speed_y=speed_y, zoom=zoom)]))
 
 @mcp.tool
 def vfx_kaleidoscope_cube(clip_id: str, kaleidoscope_params: dict = None, cube_params: dict = None) -> str:
@@ -925,40 +950,315 @@ def demonstrate_kaleidoscope_cube(
         f"in the {cube_direction} direction. Then, save the resulting video as 'kaleidoscope_cube_demo.mp4'."
     )
 
+# --- File Upload (Browser-Based) ---
+
+# Session state: maps session_id -> absolute server path (None = still pending)
+UPLOAD_SESSIONS: dict = {}
+
+SERVER_BASE_URL = os.getenv("SERVER_BASE_URL", "https://vidmagik-mcp.fly.dev")
+
+@mcp.tool
+def request_file_upload() -> str:
+    """Start a browser-based file upload session and return the upload page URL.
+
+    AGENT INSTRUCTIONS:
+    1. Call this tool to get a unique upload URL.
+    2. Use your browser tool to open that URL — the page will show a file chooser.
+    3. If the user already told you a local file path, use browser automation to
+       interact with the file input (click it, navigate to the path in the OS dialog).
+    4. Once the user selects the file the upload begins automatically — wait for
+       the page to show the success confirmation.
+    5. Call get_uploaded_file(session_id) with the session_id returned here to
+       retrieve the server-side file path.
+    6. Use that path with video_file_clip(), image_clip(), audio_file_clip(), etc.
+
+    Returns:
+        JSON string with 'session_id' and 'upload_url'.
+    """
+    import json
+    session_id = str(uuid.uuid4())
+    UPLOAD_SESSIONS[session_id] = None  # pending
+    upload_url = f"{SERVER_BASE_URL}/upload-ui?session={session_id}"
+    return json.dumps({"session_id": session_id, "upload_url": upload_url})
+
+
+@mcp.tool
+def get_uploaded_file(session_id: str) -> str:
+    """Retrieve the server-side file path after a browser upload completes.
+
+    Call this after the /upload-ui page shows a success confirmation.
+    The returned path can be passed directly to video_file_clip(), image_clip(), etc.
+
+    Args:
+        session_id: The session_id returned by request_file_upload().
+
+    Returns:
+        Absolute server-side path to the uploaded file.
+
+    Raises:
+        ValueError: If the session is unknown or the upload is still pending.
+    """
+    if session_id not in UPLOAD_SESSIONS:
+        raise ValueError(f"Unknown session_id: {session_id}. Call request_file_upload() first.")
+    path = UPLOAD_SESSIONS[session_id]
+    if path is None:
+        raise ValueError("Upload is still pending. Wait for the browser upload page to show success, then try again.")
+    return path
+
+
 # --- Custom HTTP Routes ---
 
 from starlette.requests import Request
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, HTMLResponse, Response
 
-@mcp.custom_route("/upload", methods=["POST"])
+_UPLOAD_UI_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>vidMagik — Upload File</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    min-height: 100vh; display: flex; align-items: center; justify-content: center;
+    background: #0d0d0f; font-family: 'Inter', system-ui, sans-serif; color: #e2e2e2;
+  }
+  .card {
+    background: #18181b; border: 1px solid #2a2a2e; border-radius: 16px;
+    padding: 40px 48px; width: 100%; max-width: 480px; text-align: center;
+    box-shadow: 0 8px 40px rgba(0,0,0,0.5);
+  }
+  h1 { font-size: 1.5rem; font-weight: 700; color: #fff; margin-bottom: 8px; }
+  p  { font-size: 0.9rem; color: #888; margin-bottom: 28px; }
+
+  .drop-zone {
+    border: 2px dashed #3a3a3e; border-radius: 12px; padding: 40px 20px;
+    cursor: pointer; transition: border-color 0.2s, background 0.2s;
+    position: relative;
+  }
+  .drop-zone:hover, .drop-zone.dragover {
+    border-color: #7c3aed; background: rgba(124,58,237,0.06);
+  }
+  .drop-zone input[type=file] {
+    position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%;
+  }
+  .drop-icon { font-size: 2.5rem; margin-bottom: 12px; }
+  .drop-label { font-size: 0.95rem; color: #aaa; }
+  .drop-label strong { color: #c4b5fd; }
+
+  .progress-wrap { margin-top: 24px; display: none; }
+  .progress-bar-bg {
+    background: #2a2a2e; border-radius: 999px; height: 8px; overflow: hidden;
+  }
+  .progress-bar-fill {
+    background: linear-gradient(90deg, #7c3aed, #a78bfa);
+    height: 100%; width: 0%; transition: width 0.15s; border-radius: 999px;
+  }
+  .progress-text { margin-top: 8px; font-size: 0.82rem; color: #888; }
+
+  .success { display: none; margin-top: 24px; }
+  .success-icon { font-size: 2.5rem; }
+  .success-msg { margin-top: 10px; font-size: 0.9rem; color: #86efac; }
+  .success-path {
+    margin-top: 8px; font-size: 0.78rem; color: #555; word-break: break-all;
+    background: #111; padding: 8px 12px; border-radius: 8px; text-align: left;
+  }
+  .error { display: none; margin-top: 20px; color: #f87171; font-size: 0.85rem; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>Upload Media File</h1>
+  <p>Drag and drop your file, or click to browse.<br>The upload starts automatically after selection.</p>
+
+  <div class="drop-zone" id="dropZone">
+    <input type="file" id="fileInput" accept="video/*,audio/*,image/*" />
+    <div class="drop-icon">🎬</div>
+    <div class="drop-label">Drop file here or <strong>click to browse</strong></div>
+  </div>
+
+  <div class="progress-wrap" id="progressWrap">
+    <div class="progress-bar-bg"><div class="progress-bar-fill" id="progressFill"></div></div>
+    <div class="progress-text" id="progressText">Uploading…</div>
+  </div>
+
+  <div class="success" id="successBox">
+    <div class="success-icon">✅</div>
+    <div class="success-msg" id="successMsg">Upload complete!</div>
+    <div class="success-path" id="successPath"></div>
+  </div>
+
+  <div class="error" id="errorBox"></div>
+</div>
+
+<script>
+  const SESSION_ID = new URLSearchParams(location.search).get('session') || '';
+  const dropZone   = document.getElementById('dropZone');
+  const fileInput  = document.getElementById('fileInput');
+
+  // Drag-over highlight
+  dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dragover'); });
+  dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+  dropZone.addEventListener('drop', e => {
+    e.preventDefault(); dropZone.classList.remove('dragover');
+    if (e.dataTransfer.files.length) uploadFile(e.dataTransfer.files[0]);
+  });
+
+  fileInput.addEventListener('change', () => { if (fileInput.files[0]) uploadFile(fileInput.files[0]); });
+
+  function uploadFile(file) {
+    const form = new FormData();
+    form.append('file', file);
+    const url = '/upload' + (SESSION_ID ? '?session=' + SESSION_ID : '');
+
+    const xhr = new XMLHttpRequest();
+    document.getElementById('progressWrap').style.display = 'block';
+    fileInput.disabled = true;
+
+    xhr.upload.onprogress = e => {
+      if (e.lengthComputable) {
+        const pct = Math.round(e.loaded / e.total * 100);
+        document.getElementById('progressFill').style.width = pct + '%';
+        document.getElementById('progressText').textContent = pct + '% — ' + (e.loaded / 1048576).toFixed(1) + ' MB / ' + (e.total / 1048576).toFixed(1) + ' MB';
+      }
+    };
+
+    xhr.onload = () => {
+      document.getElementById('progressWrap').style.display = 'none';
+      if (xhr.status === 200) {
+        const data = JSON.parse(xhr.responseText);
+        document.getElementById('successBox').style.display = 'block';
+        document.getElementById('successMsg').textContent = 'Upload complete — ' + file.name;
+        document.getElementById('successPath').textContent = 'Server path: ' + data.filename;
+      } else {
+        showError('Upload failed (' + xhr.status + '): ' + xhr.responseText);
+      }
+    };
+    xhr.onerror = () => showError('Network error — check your connection.');
+    xhr.open('POST', url);
+    xhr.send(form);
+  }
+
+  function showError(msg) {
+    const el = document.getElementById('errorBox');
+    el.style.display = 'block';
+    el.textContent = msg;
+    fileInput.disabled = false;
+  }
+</script>
+</body>
+</html>
+"""
+
+
+@mcp.custom_route("/upload-ui", methods=["GET"])
+async def upload_ui(request: Request):
+    """Serve the browser-based file upload page."""
+    return HTMLResponse(_UPLOAD_UI_HTML)
+
+
+@mcp.custom_route("/upload", methods=["POST", "OPTIONS"])
 async def handle_upload(request: Request):
-    """Accept raw file uploads via multipart/form-data.
-    
-    Upload files directly without base64 encoding.
-    The returned filename can be used with video_file_clip, image_clip, etc.
-    
-    Example:
-        curl -X POST http://localhost:8080/upload -F "file=@/path/to/video.mp4"
-    """
-    async with request.form() as form:
-        upload_file = form.get("file")
-        if upload_file is None:
-            return JSONResponse({"error": "No 'file' field in form data"}, status_code=400)
-        
-        filename = upload_file.filename
+    """Accept raw file uploads via multipart/form-data from the browser upload page."""
+    if request.method == "OPTIONS":
+        return Response(
+            status_code=200,
+            headers={
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Methods": "POST, OPTIONS",
+                "Access-Control-Allow-Headers": "Content-Type",
+            },
+        )
+
+    cors_headers = {"Access-Control-Allow-Origin": "*"}
+    session_id = request.query_params.get("session")
+
+    try:
+        form = await request.form()
+        uploaded = form.get("file")
+        if uploaded is None:
+            return JSONResponse({"error": "No 'file' field in form data."}, status_code=400, headers=cors_headers)
+
+        filename = getattr(uploaded, "filename", None) or ""
         if not filename:
-            return JSONResponse({"error": "No filename provided"}, status_code=400)
-        
-        # Save to the server's working directory
-        dest_path = os.path.join(os.getcwd(), filename)
-        
+            return JSONResponse({"error": "No filename provided."}, status_code=400, headers=cors_headers)
+
+        safe_name = os.path.basename(filename)
+        dest_path = os.path.join(os.getcwd(), safe_name)
+
         with open(dest_path, "wb") as dest:
-            shutil.copyfileobj(upload_file.file, dest)
-    
-    return JSONResponse({
-        "filename": dest_path,
-        "size": os.path.getsize(dest_path),
-    })
+            shutil.copyfileobj(uploaded.file, dest)
+
+        await form.close()
+    except Exception as e:
+        return JSONResponse({"error": f"Upload failed: {str(e)}"}, status_code=500, headers=cors_headers)
+
+    # Register path in session so get_uploaded_file() can retrieve it
+    if session_id and session_id in UPLOAD_SESSIONS:
+        UPLOAD_SESSIONS[session_id] = dest_path
+
+    return JSONResponse(
+        {"filename": dest_path, "size": os.path.getsize(dest_path)},
+        headers=cors_headers,
+    )
+
+
+@mcp.custom_route("/download", methods=["GET"])
+async def handle_download(request: Request):
+    """Download a file from the server by filename.
+
+    Query params:
+        file: filename or absolute path (e.g. grid_output.mp4 or /app/grid_output.mp4)
+
+    Example:
+        https://vidmagik-mcp.fly.dev/download?file=grid_output.mp4
+    """
+    from starlette.responses import FileResponse
+    filename = request.query_params.get("file", "")
+    if not filename:
+        return JSONResponse({"error": "Missing 'file' query parameter."}, status_code=400)
+
+    # Resolve: accept bare filename or full path, always resolve to CWD
+    if os.path.isabs(filename):
+        file_path = filename
+    else:
+        file_path = os.path.join(os.getcwd(), filename)
+
+    # Basic path traversal guard
+    cwd = os.path.abspath(os.getcwd())
+    if not os.path.abspath(file_path).startswith(cwd):
+        return JSONResponse({"error": "Access denied."}, status_code=403)
+
+    if not os.path.isfile(file_path):
+        return JSONResponse({"error": f"File not found: {filename}"}, status_code=404)
+
+    return FileResponse(
+        file_path,
+        media_type="application/octet-stream",
+        filename=os.path.basename(file_path),
+    )
+
+
+@mcp.tool
+def get_download_url(filename: str) -> str:
+    """Get the public download URL for a file written by write_videofile().
+
+    Call this immediately after write_videofile(). Returns the full URL the user
+    can paste directly into their browser to trigger an automatic download.
+
+    Args:
+        filename: Absolute path returned by write_videofile() (e.g. '/app/grid_output.mp4').
+
+    Returns:
+        Full HTTPS download URL (e.g. https://vidmagik-mcp.fly.dev/download?file=grid_output.mp4).
+    """
+    basename = os.path.basename(filename)
+    abs_path = filename if os.path.isabs(filename) else os.path.join(os.getcwd(), basename)
+
+    if not os.path.isfile(abs_path):
+        raise ValueError(f"File not found: {abs_path}")
+
+    return f"{SERVER_BASE_URL}/download?file={basename}"
 
 
 def parse_args(args=None):
@@ -972,12 +1272,6 @@ def main():
     args = parse_args()
     if args.transport == "stdio":
         mcp.run(transport="stdio")
-    elif args.transport == "http":
-        try:
-            mcp.run(transport="http", host=args.host, port=args.port)
-        except Exception as e:
-            print(f"HTTP transport failed: {e}. Falling back to SSE transport.")
-            mcp.run(transport="sse", host=args.host, port=args.port)
     else:
         mcp.run(transport=args.transport, host=args.host, port=args.port)
 
