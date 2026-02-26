@@ -820,7 +820,10 @@ def list_available_fonts() -> list[str]:
     fonts_dir = os.path.join(os.getcwd(), "fonts")
     if not os.path.exists(fonts_dir):
         return []
-    return sorted([f for f in os.listdir(fonts_dir) if f.lower().endswith(('.ttf', '.otf'))])
+    try:
+        return sorted([f for f in os.listdir(fonts_dir) if f.lower().endswith(('.ttf', '.otf'))])
+    except Exception:
+        return []
 
 @mcp.tool
 def write_gif(

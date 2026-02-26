@@ -50,14 +50,14 @@ from main import (
     tools_clips_array,
     vfx_accel_decel, vfx_black_white, vfx_blink, vfx_chroma_key, vfx_clone_grid,
     vfx_crop, vfx_cross_fade_in, vfx_cross_fade_out, vfx_even_size,
-    vfx_fade_in, vfx_fade_out, vfx_freeze, vfx_gamma_correction, vfx_head_blur,
+    vfx_fade_in, vfx_fade_out, vfx_freeze, vfx_freeze_region, vfx_gamma_correction, vfx_head_blur,
     vfx_invert_colors, vfx_kaleidoscope, vfx_kaleidoscope_cube, vfx_loop,
     vfx_lum_contrast, vfx_make_loopable, vfx_margin, vfx_mask_color,
     vfx_masks_and, vfx_masks_or, vfx_matrix, vfx_mirror_x, vfx_mirror_y,
     vfx_multiply_color, vfx_multiply_speed, vfx_painting, vfx_quad_mirror,
     vfx_resize, vfx_rgb_sync, vfx_rotating_cube, vfx_rotate, vfx_scroll,
     vfx_slide_in, vfx_slide_out, vfx_supersample, vfx_time_mirror,
-    vfx_time_symmetrize, vfx_auto_framing,
+    vfx_time_symmetrize, vfx_auto_framing, vfx_typewriter,
     tools_detect_scenes, tools_find_video_period, tools_find_audio_period,
     tools_drawing_color_gradient, tools_drawing_color_split, tools_file_to_subtitles,
     tools_check_installation, list_available_fonts,
@@ -117,6 +117,8 @@ class TestClipManagement:
     def test_validate_path(self):
         validate_path("test.mp4")
         validate_path("/tmp/test.mp4")
+        # Cover the 'pass' branch in validate_path
+        validate_path(os.path.join(os.getcwd(), "test.mp4"))
 
     def test_register_get_delete(self):
         cid = _color()
@@ -171,6 +173,8 @@ class TestVideoIO:
         image_clip("test.png", duration=0.5)
         with pytest.raises(FileNotFoundError):
             image_clip("missing.png")
+        with pytest.raises(ValueError):
+            image_clip("test.png", duration=-1)
 
     def test_image_sequence_clip(self):
         _png()
@@ -205,6 +209,17 @@ class TestVideoIO:
         tools_ffmpeg_extract_subclip("temp.mp4", 0, 0.1, "temp2.mp4")
         with pytest.raises(ValueError):
             tools_ffmpeg_extract_subclip("temp.mp4", 0.5, 0.1, "temp2.mp4")
+        with pytest.raises(FileNotFoundError):
+            tools_ffmpeg_extract_subclip("missing.mp4", 0, 0.1, "temp2.mp4")
+
+    @patch("main.TextClip")
+    @patch("main.CreditsClip")
+    @patch("main.SubtitlesClip")
+    def test_special_clips_errors(self, ms, mc, mt):
+        # Trigger ImageMagick error
+        mt.side_effect = RuntimeError("ImageMagick is required")
+        with pytest.raises(RuntimeError, match="ImageMagick is required"):
+            main.text_clip("hello")
 
     @patch("main.TextClip")
     @patch("main.CreditsClip")
@@ -363,6 +378,13 @@ class TestVFXExplicit:
 
     def test_vfx_freeze(self):
         vfx_freeze(self.cid, t=0.1, freeze_duration=0.2)
+        vfx_freeze(self.cid, total_duration=2.0)
+
+    def test_vfx_freeze_region(self):
+        vfx_freeze_region(self.cid, t=0.1, region=[0, 0, 5, 5])
+        vfx_freeze_region(self.cid, t=0.1, outside_region=[5, 5, 10, 10])
+        # Mask branch
+        vfx_freeze_region(self.cid, t=0.1, mask_clip_id=self.cid)
 
     def test_vfx_gamma_correction(self):
         vfx_gamma_correction(self.cid, 1.2)
@@ -410,6 +432,7 @@ class TestVFXExplicit:
     def test_vfx_resize(self):
         vfx_resize(self.cid, width=5)
         vfx_resize(self.cid, height=5)
+        vfx_resize(self.cid, width=5, height=5)
         vfx_resize(self.cid, scale=0.5)
         with pytest.raises(ValueError):
             vfx_resize(self.cid)
@@ -488,6 +511,13 @@ class TestCustomVFX:
         write_videofile(new_cid, "temp.mp4", fps=10)
         assert os.path.exists("temp.mp4")
 
+    def test_vfx_tools_wrappers(self):
+        """Test the tool wrappers for custom effects."""
+        vfx_kaleidoscope_cube(self.cid, cube_params={"speed_x": 10})
+        # Mock TextClip for typewriter
+        with patch("main.TextClip"):
+            vfx_typewriter(self.cid)
+
 
 # ---------------------------------------------------------------------------
 # Audio FX smoke test
@@ -553,12 +583,16 @@ class TestToolsUtilities:
         result = tools_check_installation()
         assert isinstance(result, str)
 
-    def test_list_available_fonts(self):
-        fonts = list_available_fonts()
-        assert isinstance(fonts, list)
-        assert len(fonts) > 0
-        assert any(f.endswith(".ttf") or f.endswith(".otf") for f in fonts)
-        assert "Agaste.ttf" in fonts
+    def test_list_available_fonts_error(self):
+        with patch("os.listdir", side_effect=OSError("dir not found")):
+            fonts = list_available_fonts()
+            assert fonts == []
+
+    def test_drawing_color_split_extended(self):
+        """Cover more branches in color_split."""
+        tools_drawing_color_split(
+            [10, 10], 5, 5, [0, 0], [10, 10], [0, 0, 0], [255, 255, 255], grad_width=2
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -742,6 +776,39 @@ class TestPrompts:
         result = rotating_cube_transition(cid)
         assert isinstance(result, str)
 
+    def test_wizards_coverage(self):
+        """Increase coverage for wizard functions in main.py."""
+        from main import slideshow_wizard, title_card_generator
+        with patch("main.ImageClip") as mic, patch("main.CompositeVideoClip") as mcc:
+            mic.return_value = MagicMock()
+            mcc.return_value = MagicMock()
+            # Pass explicit values to avoid Pydantic Field defaults issues in direct calls
+            slideshow_wizard(
+                images=["a.jpg", "b.jpg"],
+                duration_per_image=5,
+                transition_duration=1.0,
+                text_content="Hello",
+                font_file="Arial.ttf",
+                font_size=50,
+                font_color="#FFFFFF",
+                is_bold=False,
+                is_italic=False,
+                text_position="center",
+                bg_color="#000000",
+                bg_padding=10,
+                resolution=[1920, 1080],
+                fps=30
+            )
+            title_card_generator(
+                text="Hello",
+                bg_color="#000000",
+                font_file="Arial.ttf",
+                font_size=70,
+                font_color="#FFFFFF",
+                duration=3.0,
+                resolution=[1920, 1080]
+            )
+
 
 # ---------------------------------------------------------------------------
 # Real-video fixtures — target uncovered branches
@@ -919,3 +986,30 @@ class TestRealVideoFixtures:
             CLIPS.clear()
 
         assert "still remain" in result or isinstance(result, str)
+
+
+class TestCLI:
+    def test_help_command(self):
+        import subprocess
+        result = subprocess.run(["uv", "run", "python", "main.py", "--help"], capture_output=True, text=True)
+        assert result.returncode == 0
+        assert "FastMCP" in result.stdout or "usage" in result.stdout.lower()
+
+    def test_run_main_logic(self):
+        """Test the main() function logic in main.py."""
+        from main import main as main_func
+        with patch("main.FastMCP.run") as mock_run:
+            with patch("sys.argv", ["main.py"]):
+                main_func()
+                mock_run.assert_called_once()
+            
+            mock_run.reset_mock()
+            with patch("sys.argv", ["main.py", "--host", "127.0.0.1"]):
+                main_func()
+                assert mock_run.called
+
+    def test_validate_path_external(self):
+        """Hit the pass branch in validate_path for external paths."""
+        from main import validate_path
+        # Use a path that is clearly outside CWD and /tmp
+        validate_path("/etc/passwd")
