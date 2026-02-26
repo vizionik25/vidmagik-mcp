@@ -7,3 +7,4 @@ from .auto_framing import AutoFraming
 from .clone_grid import CloneGrid
 from .rotating_cube import RotatingCube
 from .kaleidoscope_cube import KaleidoscopeCube
+from .typewriter import TypeWriter

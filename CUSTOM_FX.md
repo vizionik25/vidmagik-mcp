@@ -10,6 +10,7 @@ This document provides documentation for the custom effects implemented in the `
 5. [Auto Framing](#auto-framing)
 6. [Clone Grid](#clone-grid)
 7. [Quad Mirror](#quad-mirror)
+8. [Typewriter](#typewriter)
 
 ---
 
@@ -116,3 +117,26 @@ Mirrors the clip both horizontally and vertically based on a custom center point
 ### Parameters
 - `x` (int, optional): Horizontal axis for mirroring. Defaults to the clip's center.
 - `y` (int, optional): Vertical axis for mirroring. Defaults to the clip's center.
+
+---
+
+## Typewriter
+**File:** `custom_fx/typewriter.py`  
+**Class:** `TypeWriter`
+
+A typewriter effect that progressively reveals text one character at a time, simulating the appearance of text being typed on screen. This effect works by creating text clips for each progressive state of the text and compositing them with precise timing. Perfect for creating engaging text animations, subtitles, or on-screen messages.
+
+### Parameters
+- `chars_per_second` (float, default: `10`): The speed of typing in characters per second. Higher values make the text appear faster.
+- `delay` (float, default: `0`): Initial delay in seconds before the typing animation begins. Useful for synchronizing with other events in your video.
+
+### Usage Example
+```python
+# Create a text clip
+text_clip = text_clip("Hello, World!", font="Arial", font_size=50, color="white", duration=5)
+
+# Apply typewriter effect
+typewriter_clip = vfx_typewriter(text_clip_id, chars_per_second=8, delay=0.5)
+
+# The text will start appearing after 0.5 seconds, with each character appearing in ~0.125 seconds
+```

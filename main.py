@@ -646,6 +646,18 @@ def vfx_kaleidoscope_cube(clip_id: str, kaleidoscope_params: dict = None, cube_p
     return register_clip(effect.apply(clip))
 
 @mcp.tool
+def vfx_typewriter(clip_id: str, chars_per_second: float = 10, delay: float = 0) -> str:
+    """Apply a typewriter effect that reveals text one character at a time.
+    
+    Parameters:
+    - chars_per_second: How many characters to reveal per second (default: 10)
+    - delay: Initial delay in seconds before typing starts (default: 0)
+    """
+    clip = get_clip(clip_id)
+    effect = TypeWriter(chars_per_second=chars_per_second, delay=delay)
+    return register_clip(effect.apply(clip))
+
+@mcp.tool
 def vfx_resize(clip_id: str, width: int = None, height: int = None, scale: float = None) -> str:
     """Resize clip."""
     clip = get_clip(clip_id)

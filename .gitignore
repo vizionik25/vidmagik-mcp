@@ -32,6 +32,9 @@ __pycache__/
 # Helper/test scripts
 decode_b64.py
 
+# Workspace rules
+WORKSPACE_RULES.md
+
 # OS
 .DS_Store
 conductor/
