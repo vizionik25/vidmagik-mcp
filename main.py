@@ -18,6 +18,7 @@ mcp = FastMCP("vidmagik-mcp")
 
 CLIPS = {}
 MAX_CLIPS = 30
+FONT_PATH = os.path.join(os.getcwd(), "fonts")
 
 # --- Clip Management ---
 
@@ -797,6 +798,14 @@ def tools_file_to_subtitles(filename: str, encoding: str = "utf-8") -> list:
         raise FileNotFoundError(f"File {filename} not found.")
     subs = file_to_subtitles(filename, encoding=encoding)
     return [[float(s), float(e), txt] for s, e, txt in subs]
+
+@mcp.tool
+def list_available_fonts() -> list[str]:
+    """List all available fonts in the fonts directory."""
+    fonts_dir = os.path.join(os.getcwd(), "fonts")
+    if not os.path.exists(fonts_dir):
+        return []
+    return sorted([f for f in os.listdir(fonts_dir) if f.lower().endswith(('.ttf', '.otf'))])
 
 @mcp.tool
 def write_gif(

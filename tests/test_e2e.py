@@ -60,7 +60,7 @@ from main import (
     vfx_time_symmetrize, vfx_auto_framing,
     tools_detect_scenes, tools_find_video_period, tools_find_audio_period,
     tools_drawing_color_gradient, tools_drawing_color_split, tools_file_to_subtitles,
-    tools_check_installation,
+    tools_check_installation, list_available_fonts,
     request_file_upload, get_uploaded_file, get_download_url,
     UPLOAD_SESSIONS,
 )
@@ -552,6 +552,13 @@ class TestToolsUtilities:
         # Just verify it doesn't raise an unhandled exception
         result = tools_check_installation()
         assert isinstance(result, str)
+
+    def test_list_available_fonts(self):
+        fonts = list_available_fonts()
+        assert isinstance(fonts, list)
+        assert len(fonts) > 0
+        assert any(f.endswith(".ttf") or f.endswith(".otf") for f in fonts)
+        assert "Agaste.ttf" in fonts
 
 
 # ---------------------------------------------------------------------------
