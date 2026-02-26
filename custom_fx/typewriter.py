@@ -5,24 +5,23 @@ This module provides a typewriter effect that reveals text one character at a ti
 simulating the appearance of text being typed on screen.
 """
 
-from moviepy import VideoClip, TextClip, CompositeVideoClip
-from moviepy.decorators import requires_duration
+from moviepy import Effect, TextClip
 import numpy as np
 
 
-class TypeWriter:
+class TypeWriter(Effect):
     """
-    A typewriter effect that progressively reveals text one character at a time.
+    A MoviePy effect that reveals text one character at a time, simulating typing.
     
-    This effect works by creating text clips for each progressive state of the text
-    and compositing them with precise timing to simulate typing.
+    This effect progressively shows characters from the source text clip based on time,
+    creating the illusion of live typing.
     
     Parameters
     ----------
     chars_per_second : float, default=10
         The speed of typing in characters per second.
     delay : float, default=0
-        Initial delay before typing begins, in seconds.
+        Initial delay in seconds before typing begins.
     """
     
     def __init__(self, chars_per_second: float = 10, delay: float = 0):
@@ -39,14 +38,14 @@ class TypeWriter:
         self.chars_per_second = chars_per_second
         self.delay = delay
     
-    def apply(self, clip: VideoClip) -> VideoClip:
+    def apply(self, clip):
         """
         Apply the typewriter effect to a text clip.
         
         Parameters
         ----------
         clip : VideoClip
-            The text clip to apply the effect to
+            The text clip to apply the effect to. Must have a 'text' attribute.
             
         Returns
         -------
@@ -57,61 +56,104 @@ class TypeWriter:
             # If it's not a text clip, return unchanged
             return clip
         
-        text = clip.text
+        original_text = clip.text
         char_duration = 1.0 / self.chars_per_second
-        total_chars = len(text)
+        total_chars = len(original_text)
         
-        # Calculate total duration needed for typing
-        typing_duration = total_chars * char_duration
-        clip_duration = clip.duration if hasattr(clip, 'duration') else typing_duration + self.delay
+        def make_frame(get_frame, t):
+            """Generate frame with progressively revealed text."""
+            # Calculate how many characters should be visible at time t
+            if t < self.delay:
+                # Before delay, show nothing (empty text)
+                num_chars = 0
+            else:
+                # After delay, calculate progress
+                time_since_start = t - self.delay
+                num_chars = int(time_since_start / char_duration) + 1
+                num_chars = min(num_chars, total_chars)
+            
+            # Temporarily modify the clip's text
+            original_get_frame = get_frame
+            
+            if num_chars == 0:
+                # Show empty/blank frame
+                frame = get_frame(t)
+                # Clear the frame (make it transparent or black)
+                frame[:] = 0
+                return frame
+            else:
+                # Get the frame with the original render
+                frame = get_frame(t)
+                return frame
         
-        # Create clips for each character progression
+        # Create a new text clip with progressive text reveal
+        def filter_func(get_frame, t):
+            """Filter to progressively show text based on time."""
+            if t < self.delay:
+                num_chars = 0
+            else:
+                time_since_start = t - self.delay
+                num_chars = int(time_since_start / char_duration) + 1
+                num_chars = min(num_chars, total_chars)
+            
+            if num_chars == 0:
+                # Create empty frame
+                frame = get_frame(t)
+                frame[:] = 0
+                return frame
+            else:
+                # Show partial text
+                return get_frame(t)
+        
+        # Build progressive text clips and composite them
+        from moviepy import CompositeVideoClip
+        
         clips = []
         
-        if self.delay > 0:
-            # Create a blank/empty clip for the delay period
-            from moviepy import ColorClip
-            blank = ColorClip(
-                size=(clip.w, clip.h) if hasattr(clip, 'w') else (1920, 1080),
-                color=(0, 0, 0)
-            ).with_duration(self.delay)
-            clips.append(blank)
-        
-        # Generate progressively longer text clips
+        # For each character progression, create a text clip
         for i in range(1, total_chars + 1):
-            partial_text = text[:i]
+            partial_text = original_text[:i]
+            start_time = self.delay + (i - 1) * char_duration
             
             # Create a text clip with the partial text
-            # Use the same properties as the original clip
-            text_props = {}
-            if hasattr(clip, 'font'):
-                text_props['font'] = clip.font
-            if hasattr(clip, 'font_size'):
-                text_props['font_size'] = clip.font_size
-            if hasattr(clip, 'color'):
-                text_props['color'] = clip.color
-            if hasattr(clip, 'method'):
-                text_props['method'] = clip.method
-            if hasattr(clip, 'bg_color'):
-                text_props['bg_color'] = clip.bg_color
-            if hasattr(clip, 'size'):
-                text_props['size'] = clip.size
+            txt_clip = TextClip(partial_text)
             
-            txt_clip = TextClip(
-                text=partial_text,
-                **text_props
-            ).with_duration(char_duration)
+            # Copy properties from original clip
+            if hasattr(clip, 'font'):
+                txt_clip = TextClip(partial_text, font=clip.font)
+            if hasattr(clip, 'font_size'):
+                txt_clip = TextClip(
+                    partial_text, 
+                    font=getattr(clip, 'font', None),
+                    font_size=clip.font_size
+                )
+            if hasattr(clip, 'color'):
+                txt_clip = TextClip(
+                    partial_text,
+                    font=getattr(clip, 'font', None),
+                    font_size=getattr(clip, 'font_size', None),
+                    color=clip.color
+                )
+            
+            txt_clip = txt_clip.with_duration(char_duration).with_start(start_time)
+            
+            # Copy position from original clip
+            if hasattr(clip, 'pos'):
+                txt_clip = txt_clip.with_position(clip.pos)
             
             clips.append(txt_clip)
         
-        # Concatenate all clips to create the typewriter effect
+        # Composite all the progressive text clips
         result = CompositeVideoClip(
             clips,
-            size=(clip.w, clip.h) if hasattr(clip, 'w') else None
-        ).with_duration(clip_duration)
+            size=(clip.w, clip.h) if hasattr(clip, 'w') and hasattr(clip, 'h') else None
+        )
         
-        # Copy position and other properties from original clip
-        if hasattr(clip, 'pos'):
-            result = result.with_position(clip.pos)
+        # Set the total duration
+        total_duration = self.delay + total_chars * char_duration
+        if hasattr(clip, 'duration') and clip.duration > total_duration:
+            result = result.with_duration(clip.duration)
+        else:
+            result = result.with_duration(total_duration)
         
         return result
