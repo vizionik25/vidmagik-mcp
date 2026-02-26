@@ -141,7 +141,10 @@ def text_clip(
     method: str = "label",
     duration: float = None
 ) -> str:
-    """Create a text clip."""
+    """
+    Create a text clip. the full path to the font file must be provided. you can use the list_available_fonts tool to 
+    get the list of available fonts. and the FONT_PATH variable to get the path to the fonts directory.
+    """
     if duration is not None and duration <= 0:
         raise ValueError("Duration must be positive.")
     try:
