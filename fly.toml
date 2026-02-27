@@ -27,6 +27,7 @@ primary_region = 'dfw'
     name = "mcp-session-id"
 
 [[vm]]
-  memory = '4gb'
-  cpus = 2
-  memory_mb = 4096
+  memory = '16gb'
+  cpus = 8
+  memory_mb = 16384
+  cpu_kind = "performance"
