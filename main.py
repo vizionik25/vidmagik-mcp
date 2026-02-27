@@ -1,4 +1,5 @@
 from fastmcp import FastMCP
+from fastmcp.server.transforms import PromptsAsTools
 from moviepy import *
 from moviepy.video.tools.drawing import color_gradient, color_split
 from moviepy.video.tools.cuts import detect_scenes, find_video_period
@@ -989,7 +990,7 @@ def demonstrate_kaleidoscope_cube(
 
 @mcp.prompt
 def typewriter_demo() -> str:
-    """Interactive typewriter workflow: lists available fonts, collects user choices,
+    """Interactive typewriter workflow: list_available_fonts, collects user choices,
     then creates a text clip, applies the typewriter effect, and returns a download URL."""
 
     def _typewriter_apply(text: str, font: str, font_size: int, color: str, output_filename: str = "typewriter_output.mp4") -> str:
@@ -1011,7 +1012,8 @@ def typewriter_demo() -> str:
         f"{_typewriter_apply('<user_text>', '<user_font>', '<user_font_size>', '<user_color>')}"
     )
 
-
+# Add the transform - creates list_prompts and get_prompt tools
+mcp.add_transform(PromptsAsTools(mcp))
 
 # --- File Upload (Browser-Based) ---
 
