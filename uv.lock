@@ -1370,6 +1370,7 @@ dependencies = [
     { name = "numexpr" },
     { name = "opencv-contrib-python-headless" },
     { name = "pytest" },
+    { name = "uvicorn" },
 ]
 
 [package.dev-dependencies]
@@ -1384,6 +1385,7 @@ requires-dist = [
     { name = "numexpr", specifier = ">=2.14.1" },
     { name = "opencv-contrib-python-headless", specifier = ">=4.13.0.92" },
     { name = "pytest", specifier = ">=9.0.2" },
+    { name = "uvicorn", specifier = ">=0.41.0" },
 ]
 
 [package.metadata.requires-dev]

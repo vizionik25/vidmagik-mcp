@@ -39,6 +39,5 @@ RUN uv sync --frozen --no-cache
 COPY . .
 
 # Run the server
-# We use uv run to execute in the synced virtual environment
-CMD ["uv", "run", "fastmcp", "run", "main.py", "--transport", "http", "--host", "0.0.0.0", "--port", "8080"]
-
+# We use uv run to execute uvicorn in the synced virtual environment
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

@@ -1,4 +1,5 @@
-from fastmcp import FastMCP
+from fastmcp import FastMCP, Context
+from fastmcp.server.event_store import EventStore
 from fastmcp.server.transforms import PromptsAsTools
 from fastmcp.server.transforms import ResourcesAsTools
 from fastmcp.tools import Tool, tool as standalone_tool
@@ -10,7 +11,11 @@ from moviepy.video.tools.cuts import detect_scenes, find_video_period
 from moviepy.video.io.ffmpeg_tools import ffmpeg_extract_subclip
 from moviepy.video.tools.subtitles import file_to_subtitles, SubtitlesClip
 from moviepy.video.tools.credits import CreditsClip
+from fastmcp.server.auth.providers.github import GitHubProvider
+from starlette.applications import Starlette
+from starlette.routing import Mount
 import os
+import uvicorn
 import shutil
 import uuid
 import numpy as np
@@ -18,14 +23,37 @@ import numexpr
 from custom_fx import *
 import argparse
 import sys
+from dotenv import load_dotenv
 
-mcp = FastMCP("vidmagik-mcp")
+load_dotenv()
+
+
 
 CLIPS = {}
 STASH = {}
 MAX_CLIPS = 30
 FONT_PATH = os.path.join(os.getcwd(), "fonts")
 STASH_DIR = os.path.join("/tmp", "vidmagik_stash")
+# Define routing structure
+ROOT_URL = os.environ.get("SERVER_BASE_URL", "http://localhost:8000")
+MOUNT_PREFIX = ""
+MCP_PATH = "/mcp"
+
+#-------- AUTH ----------
+# Optional: Add Github OAuth provider for authentication
+# Set these environment variables to enable it
+client_id = os.environ.get("GITHUB_CLIENT_ID")
+client_secret = os.environ.get("GITHUB_CLIENT_SECRET")
+
+if client_id and client_secret:
+    auth = GitHubProvider(
+        client_id=client_id,
+        client_secret=client_secret,
+        base_url=f"{ROOT_URL}{MOUNT_PREFIX}",
+    )
+    mcp = FastMCP("vidmagik-mcp", auth=auth)
+else:
+    raise ValueError("GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET must be set to run this server. Running without OAuth is not permitted.")
 
 # --- Clip Management ---
 
@@ -1522,23 +1550,26 @@ def get_download_url(filename: str) -> str:
     if not os.path.isfile(abs_path):
         raise ValueError(f"File not found: {abs_path}")
 
-    return f"{SERVER_BASE_URL}/download?file={basename}"
 
+# Configure with EventStore for resumability and build the ASGI app
+event_store = EventStore()
+mcp_app = mcp.http_app(
+    path=MCP_PATH,
+    event_store=event_store,
+    retry_interval=2000,
+)
 
-def parse_args(args=None):
-    parser = argparse.ArgumentParser(description="vidMagik MCP Server")
-    parser.add_argument("--transport", choices=["stdio", "sse", "http"], default="http", help="Transport type (default: http)")
-    parser.add_argument("--host", default=os.getenv("HOST", "0.0.0.0"), help=f"Host for HTTP/SSE (default: {os.getenv('HOST', '0.0.0.0')})")
-    parser.add_argument("--port", type=int, default=int(os.getenv("PORT", "8080")), help=f"Port for HTTP/SSE (default: {os.getenv('PORT', '8080')})")
-    return parser.parse_args(args)
+routes = []
+if hasattr(mcp, "auth") and mcp.auth:
+    routes.extend(mcp.auth.get_well_known_routes(mcp_path=MCP_PATH))
 
-def main():
-    args = parse_args()
-    if args.transport == "stdio":
-        mcp.run(transport="stdio")
-    else:
-        mcp.run(transport=args.transport, host=args.host, port=args.port)
+routes.append(Mount(MOUNT_PREFIX or "/", app=mcp_app))
+
+app = Starlette(
+    routes=routes,
+    lifespan=mcp_app.lifespan,
+)
+
 
 if __name__ == "__main__":
-    main()
-
+   uvicorn.run(app, host="0.0.0.0", port=8000)

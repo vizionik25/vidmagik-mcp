@@ -41,4 +41,7 @@ conductor/
 
 # FastMCP Docs
 toolTransforms.md
+httpdeployment.md
 
+# Environment variables
+.env

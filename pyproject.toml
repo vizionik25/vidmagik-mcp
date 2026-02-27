@@ -8,6 +8,7 @@ dependencies = [
     "numexpr>=2.14.1",
     "opencv-contrib-python-headless>=4.13.0.92",
     "pytest>=9.0.2",
+    "uvicorn>=0.41.0",
 ]
 
 [dependency-groups]
