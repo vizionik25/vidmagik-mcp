@@ -21,8 +21,10 @@ import sys
 mcp = FastMCP("vidmagik-mcp")
 
 CLIPS = {}
+STASH = {}
 MAX_CLIPS = 30
 FONT_PATH = os.path.join(os.getcwd(), "fonts")
+STASH_DIR = os.path.join("/tmp", "vidmagik_stash")
 
 # --- Clip Management ---
 
@@ -93,6 +95,69 @@ def purge_clips() -> str:
     if remaining:
         return f"Deleted {len(before)} clip(s), but {len(remaining)} still remain: {remaining}"
     return f"Purged {len(before)} clip(s). Memory is now empty ✓"
+
+
+# --- Stash (park clips to disk, restore on demand) ---
+
+@mcp.tool
+def stash_clip(clip_id: str, fps: float = 24) -> str:
+    """Move a clip out of active memory to temporary disk storage, freeing RAM.
+    Returns a stash_id to restore it later with unstash_clip."""
+    clip = get_clip(clip_id)
+    os.makedirs(STASH_DIR, exist_ok=True)
+    stash_id = str(uuid.uuid4())
+    path = os.path.join(STASH_DIR, f"{stash_id}.mp4")
+    clip.write_videofile(path, fps=fps, logger=None)
+    try:
+        clip.close()
+    except Exception:
+        pass
+    del CLIPS[clip_id]
+    STASH[stash_id] = path
+    return stash_id
+
+
+@mcp.tool
+def unstash_clip(stash_id: str) -> str:
+    """Restore a stashed clip back into active memory. Returns a new clip_id.
+    The stash slot is cleared after restoration."""
+    if stash_id not in STASH:
+        raise ValueError(f"Stash ID '{stash_id}' not found. Use list_stashed_clips to see available stash IDs.")
+    path = STASH[stash_id]
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"Stash file missing at {path}.")
+    clip_id = register_clip(VideoFileClip(path))
+    del STASH[stash_id]
+    try:
+        os.remove(path)
+    except Exception:
+        pass
+    return clip_id
+
+
+@mcp.tool
+def list_stashed_clips() -> dict:
+    """List all clips currently in the stash, with their disk size in MB."""
+    result = {}
+    for sid, path in STASH.items():
+        size_mb = round(os.path.getsize(path) / 1024 / 1024, 2) if os.path.exists(path) else 0
+        result[sid] = {"path": path, "size_mb": size_mb}
+    return result
+
+
+@mcp.tool
+def purge_stash() -> str:
+    """Delete all stashed clips from disk and clear the stash dict."""
+    count = len(STASH)
+    if not count:
+        return "Stash is already empty."
+    for path in STASH.values():
+        try:
+            os.remove(path)
+        except Exception:
+            pass
+    STASH.clear()
+    return f"Purged {count} stashed clip(s) from disk. Stash is now empty ✓"
 
 # --- Video IO ---
 

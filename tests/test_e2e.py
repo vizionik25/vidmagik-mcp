@@ -39,8 +39,9 @@ from starlette.testclient import TestClient
 
 import main
 from main import (
-    CLIPS,
+    CLIPS, STASH,
     validate_path, register_clip, get_clip, list_clips, delete_clip, purge_clips,
+    stash_clip, unstash_clip, list_stashed_clips, purge_stash,
     video_file_clip, image_clip, image_sequence_clip, color_clip,
     write_videofile, write_gif, tools_ffmpeg_extract_subclip,
     audio_file_clip, write_audiofile,
@@ -80,9 +81,11 @@ _TEMP_FILES = [
 @pytest.fixture(autouse=True)
 def cleanup():
     CLIPS.clear()
+    STASH.clear()
     UPLOAD_SESSIONS.clear()
     yield
     CLIPS.clear()
+    STASH.clear()
     UPLOAD_SESSIONS.clear()
     for f in _TEMP_FILES:
         if os.path.exists(f):
@@ -158,6 +161,69 @@ class TestClipManagement:
             register_clip(MagicMock())
         with pytest.raises(RuntimeError):
             register_clip(MagicMock())
+
+
+
+# ---------------------------------------------------------------------------
+# Stash
+# ---------------------------------------------------------------------------
+
+class TestStash:
+    def test_stash_and_unstash_roundtrip(self):
+        """Stash a clip, verify it's removed from CLIPS, restore it."""
+        cid = _color(duration=0.2, size=(10, 10))
+        assert cid in CLIPS
+        stash_id = stash_clip(cid, fps=5)
+        # Clip should be gone from active memory
+        assert cid not in CLIPS
+        assert stash_id in STASH
+        # Restore
+        new_cid = unstash_clip(stash_id)
+        assert new_cid in CLIPS
+        assert stash_id not in STASH
+
+    def test_list_stashed_clips_empty(self):
+        result = list_stashed_clips()
+        assert result == {}
+
+    def test_list_stashed_clips_populated(self):
+        cid = _color(duration=0.2, size=(10, 10))
+        stash_id = stash_clip(cid, fps=5)
+        result = list_stashed_clips()
+        assert stash_id in result
+        assert "size_mb" in result[stash_id]
+        # Clean up
+        unstash_clip(stash_id)
+
+    def test_list_stashed_missing_file(self):
+        """list_stashed_clips must handle a missing file gracefully (size=0)."""
+        STASH["ghost"] = "/tmp/vidmagik_stash/nonexistent.mp4"
+        result = list_stashed_clips()
+        assert result["ghost"]["size_mb"] == 0
+        del STASH["ghost"]
+
+    def test_unstash_unknown_id(self):
+        with pytest.raises(ValueError, match="not found"):
+            unstash_clip("no-such-id")
+
+    def test_unstash_missing_file(self):
+        STASH["orphan"] = "/tmp/vidmagik_stash/gone.mp4"
+        with pytest.raises(FileNotFoundError):
+            unstash_clip("orphan")
+        del STASH["orphan"]
+
+    def test_purge_stash_empty(self):
+        result = purge_stash()
+        assert "empty" in result.lower()
+
+    def test_purge_stash(self):
+        cid1 = _color(duration=0.2, size=(10, 10))
+        cid2 = _color(duration=0.2, size=(10, 10))
+        stash_clip(cid1, fps=5)
+        stash_clip(cid2, fps=5)
+        result = purge_stash()
+        assert "2" in result
+        assert STASH == {}
 
 
 # ---------------------------------------------------------------------------
