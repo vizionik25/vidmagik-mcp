@@ -1,5 +1,6 @@
 from fastmcp import FastMCP
 from fastmcp.server.transforms import PromptsAsTools
+from fastmcp.server.transforms import ResourcesAsTools
 from fastmcp.tools import Tool, tool as standalone_tool
 from fastmcp.tools.tool_transform import ArgTransform
 from typing import Optional
@@ -1211,6 +1212,7 @@ def typewriter_demo() -> str:
 
 # Add the transform - creates list_prompts and get_prompt tools
 mcp.add_transform(PromptsAsTools(mcp))
+mcp.add_transform(ResourcesAsTools(mcp))
 
 # --- File Upload (Browser-Based) ---
 
