@@ -6,6 +6,7 @@ FROM python:3.12-slim
 # imagemagick: required by moviepy for TextClip
 # libsm6, libxext6, libgl1: required by opencv
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    uvicorn \
     ffmpeg \
     imagemagick \
     libsm6 \
@@ -40,4 +41,4 @@ COPY . .
 
 # Run the server
 # We use uv run to execute uvicorn in the synced virtual environment
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uv", "run", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
