@@ -2,6 +2,7 @@ from fastmcp import FastMCP
 from fastmcp.server.transforms import PromptsAsTools
 from fastmcp.tools import Tool, tool as standalone_tool
 from fastmcp.tools.tool_transform import ArgTransform
+from typing import Optional
 from moviepy import *
 from moviepy.video.tools.drawing import color_gradient, color_split
 from moviepy.video.tools.cuts import detect_scenes, find_video_period
@@ -691,11 +692,11 @@ def _psychedelic_cube_base(
     speed: float = 45.0,
     zoom: float = 1.0,
     amplitude: float = 40.0,
-    speed_x: float = None,
-    speed_y: float = None,
-    speed_z: float = None,
-    _x: int = None,
-    _y: int = None,
+    speed_x: Optional[float] = None,
+    speed_y: Optional[float] = None,
+    speed_z: Optional[float] = None,
+    _x: Optional[int] = None,
+    _y: Optional[int] = None,
 ) -> str:
     """Base implementation: applies Kaleidoscope then RotatingCube with per-axis speeds."""
     clip = get_clip(clip_id)
