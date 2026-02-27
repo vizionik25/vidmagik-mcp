@@ -130,6 +130,7 @@ def image_sequence_clip(sequence: list[str], fps: float = None, durations: list[
         clip = ImageSequenceClip(seq, fps=fps, durations=durations, with_mask=with_mask)
     return register_clip(clip)
 
+
 @mcp.tool
 def text_clip(
     text: str,
@@ -985,6 +986,32 @@ def demonstrate_kaleidoscope_cube(
         f"{kaleidoscope_slices} kaleidoscope slices, a cube rotation speed of {cube_speed} deg/s "
         f"in the {cube_direction} direction. Then, save the resulting video as 'kaleidoscope_cube_demo.mp4'."
     )
+
+@mcp.prompt
+def typewriter_demo() -> str:
+    """Interactive typewriter workflow: lists available fonts, collects user choices,
+    then creates a text clip, applies the typewriter effect, and returns a download URL."""
+
+    def _typewriter_apply(text: str, font: str, font_size: int, color: str, output_filename: str = "typewriter_output.mp4") -> str:
+        return (
+            f"Call text_clip with: text='{text}', font='/app/fonts/{font}', font_size={font_size}, "
+            f"color='{color}', bg_color='black', method='caption', size=[640, 300], duration=8. "
+            f"Take the clip_id returned by text_clip and pass it to vfx_typewriter with chars_per_second=5 and delay=0.5. "
+            f"Take the clip_id returned by vfx_typewriter and pass it to write_videofile with filename='/app/{output_filename}' and fps=24. "
+            f"Call get_download_url with '/app/{output_filename}' and return the URL to the user."
+        )
+
+    return (
+        f"Run the following steps in order: "
+        f"1. Call list_available_fonts and present the full list to the user. "
+        f"2. Ask the user to supply: the font filename, the text to type "
+        f"(remind them to use \\n for line breaks to keep all words visible), "
+        f"the font size, and the text color. Wait for their response before continuing. "
+        f"3. Once the user has provided all four values, execute: "
+        f"{_typewriter_apply('<user_text>', '<user_font>', '<user_font_size>', '<user_color>')}"
+    )
+
+
 
 # --- File Upload (Browser-Based) ---
 
