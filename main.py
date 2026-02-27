@@ -980,9 +980,51 @@ def tools_file_to_subtitles(filename: str, encoding: str = "utf-8") -> list:
     subs = file_to_subtitles(filename, encoding=encoding)
     return [[float(s), float(e), txt] for s, e, txt in subs]
 
+@mcp.resource("fonts://list")
+def list_fonts_resource() -> str:
+    """List all available fonts in the fonts directory as JSON.
+    Use this resource to discover font filenames for use in text clips.
+    """
+    import json
+    fonts_dir = os.path.join(os.getcwd(), "fonts")
+    if not os.path.exists(fonts_dir):
+        return "[]"
+    try:
+        fonts = sorted([f for f in os.listdir(fonts_dir) if f.lower().endswith(('.ttf', '.otf'))])
+        return json.dumps(fonts)
+    except Exception:
+        return "[]"
+
+@mcp.resource("fonts://{font_name}")
+def get_font_resource(font_name: str) -> str:
+    """Get metadata and absolute path for a specific font.
+    Args:
+        font_name: The filename of the font (e.g., 'Lobster.otf')
+    """
+    import json
+    fonts_dir = os.path.join(os.getcwd(), "fonts")
+    font_path = os.path.join(fonts_dir, font_name)
+    
+    if not os.path.exists(font_path) or not font_name.lower().endswith(('.ttf', '.otf')):
+        return json.dumps({"error": f"Font {font_name} not found or invalid."})
+        
+    try:
+        size_bytes = os.path.getsize(font_path)
+        mime_type = "font/ttf" if font_name.lower().endswith('.ttf') else "font/otf"
+        return json.dumps({
+            "name": font_name,
+            "path": font_path,
+            "size_bytes": size_bytes,
+            "mime_type": mime_type
+        })
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
 @mcp.tool
 def list_available_fonts() -> list[str]:
-    """List all available fonts in the fonts directory."""
+    """List all available fonts in the fonts directory.
+    Note: It is recommended to use the 'fonts://list' resource instead.
+    """
     fonts_dir = os.path.join(os.getcwd(), "fonts")
     if not os.path.exists(fonts_dir):
         return []
