@@ -642,12 +642,13 @@ def vfx_clone_grid(clip_id: str, n_clones: int = 4) -> str:
     return register_clip(clip.with_effects([CloneGrid(n_clones)]))
 
 @mcp.tool
-def vfx_rotating_cube(clip_id: str, speed: float = 45, direction: str = "horizontal", zoom: float = 1.0) -> str:
-    """Simulates a 3D rotating cube effect with the video mapped to its faces."""
+def vfx_rotating_cube(clip_id: str, speed: float = 45, zoom: float = 1.0, amplitude: float = 40.0) -> str:
+    """Simulates an interior perspective of a cube rotating in a figure-8 (lemniscate) pattern.
+    The viewer is inside the cube looking at a corner where 3 faces meet.
+    All 3 rotation axes (pitch, yaw, roll) are driven from a single speed value."""
     clip = get_clip(clip_id)
-    speed_x = 0.0 if direction == "horizontal" else float(speed)
-    speed_y = float(speed) if direction == "horizontal" else 0.0
-    return register_clip(clip.with_effects([RotatingCube(speed_x=speed_x, speed_y=speed_y, zoom=zoom)]))
+    return register_clip(clip.with_effects([RotatingCube(speed=speed, zoom=zoom, amplitude=amplitude)]))
+
 
 @mcp.tool
 def vfx_kaleidoscope_cube(clip_id: str, kaleidoscope_params: dict = None, cube_params: dict = None) -> str:

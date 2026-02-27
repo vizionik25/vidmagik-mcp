@@ -38,3 +38,7 @@ WORKSPACE_RULES.md
 # OS
 .DS_Store
 conductor/
+
+# FastMCP Docs
+toolTransforms.md
+
