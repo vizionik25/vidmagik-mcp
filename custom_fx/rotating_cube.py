@@ -1,15 +1,19 @@
 """
-RotatingCube - Interior Corner Perspective Effect
+RotatingCube - Interior Corner Perspective Effect (Ray-Cast Implementation)
 
 Simulates standing inside a cube looking at a corner where 3 faces meet.
-The cube walls rotate around the viewer in a figure-8 (lemniscate) pattern
-driven by full 3-axis (pitch/yaw/roll) oscillation so each face is
-independently animated through the infinity-curve path.
+Uses ray-casting — each output pixel casts a ray into the rotated cube and
+samples the source frame at the UV intersection point. Geometrically correct
+for interior rendering with no backface-culling ambiguity.
+
+The cube rotates around the fixed camera via a 3-axis lemniscate (figure-8):
+  theta (X-pitch) = A * sin(w*t)
+  phi   (Y-yaw)   = A * sin(2*w*t) / 2
+  psi   (Z-roll)  = A * sin(2*w*t) * sin(w*t) / 2
 """
 
 from moviepy import Effect
 import numpy as np
-import cv2
 
 
 class RotatingCube(Effect):
@@ -18,17 +22,17 @@ class RotatingCube(Effect):
 
     The camera is fixed at the origin inside the cube, aimed at the corner
     where three faces meet (+X right wall, +Y floor, +Z front wall).
-    All three rotation axes are driven independently by the lemniscate so
-    each face swings through the figure-8 path distinctly.
+    All three rotation axes (pitch, yaw, roll) are driven from a single
+    speed value via the lemniscate equations.
 
     Parameters
     ----------
     speed : float
-        Base oscillation frequency in degrees/sec. All 3 axes derive from this.
+        Base oscillation frequency in degrees/sec.
     zoom : float
-        Focal length multiplier. Higher = tighter / more telephoto corner view.
+        Focal length multiplier. Higher = more telephoto, tighter corner.
     amplitude : float
-        Angular sweep amplitude in degrees (half-range of the figure-8 swing).
+        Angular sweep in degrees — how far the figure-8 oscillates.
     """
 
     def __init__(
@@ -36,11 +40,10 @@ class RotatingCube(Effect):
         speed: float = 45.0,
         zoom: float = 1.0,
         amplitude: float = 40.0,
-        # Legacy compat — ignored by the new implementation
+        # Legacy compat — silently absorbed
         speed_x: float = None,
         speed_y: float = None,
     ):
-        # If called via old main.py path (speed_x/speed_y), derive speed from them
         if speed_x is not None or speed_y is not None:
             self.speed = max(abs(speed_x or 0), abs(speed_y or 0), 1.0)
         else:
@@ -55,37 +58,17 @@ class RotatingCube(Effect):
     @staticmethod
     def _Rx(a):
         c, s = np.cos(a), np.sin(a)
-        return np.array([[1, 0, 0],
-                         [0, c, -s],
-                         [0, s,  c]], dtype=np.float64)
+        return np.array([[1, 0, 0], [0, c, -s], [0, s, c]], dtype=np.float64)
 
     @staticmethod
     def _Ry(a):
         c, s = np.cos(a), np.sin(a)
-        return np.array([[ c, 0, s],
-                         [ 0, 1, 0],
-                         [-s, 0, c]], dtype=np.float64)
+        return np.array([[c, 0, s], [0, 1, 0], [-s, 0, c]], dtype=np.float64)
 
     @staticmethod
     def _Rz(a):
         c, s = np.cos(a), np.sin(a)
-        return np.array([[c, -s, 0],
-                         [s,  c, 0],
-                         [0,  0, 1]], dtype=np.float64)
-
-    @staticmethod
-    def _project(pts_3d, focal, cx, cy):
-        """
-        Perspective-project Nx3 points to Nx2 screen coords.
-        Returns None if any point is behind or at the camera plane.
-        """
-        out = []
-        for x, y, z in pts_3d:
-            if z <= 0.01:
-                return None
-            out.append([focal * x / z + cx,
-                        focal * y / z + cy])
-        return np.array(out, dtype=np.float32)
+        return np.array([[c, -s, 0], [s, c, 0], [0, 0, 1]], dtype=np.float64)
 
     # ------------------------------------------------------------------
     # Effect apply
@@ -97,101 +80,99 @@ class RotatingCube(Effect):
             frame = get_frame(t)
             h, w = frame.shape[:2]
 
-            S = max(w, h) * 0.85          # cube half-size — slightly less than frame
+            S     = max(w, h) * 0.85          # cube half-size
             focal = max(w, h) * self.zoom
             cx, cy = w * 0.5, h * 0.5
 
-            # --- 3-axis lemniscate (figure-8) angles ---
-            # ω in rad/sec from degrees/sec speed
+            # --- 3-axis lemniscate angles ---
             omega = np.deg2rad(self.speed)
             A = self.amplitude
 
-            # θ (pitch / X-axis): primary oscillation → drives +Y floor face
-            theta = A * np.sin(omega * t)
-            # φ (yaw   / Y-axis): double-frequency   → drives +X right wall face
-            phi   = A * np.sin(2.0 * omega * t) * 0.5
-            # ψ (roll  / Z-axis): coupled product     → drives +Z front wall face
-            psi   = A * np.sin(2.0 * omega * t) * np.sin(omega * t) * 0.5
+            theta = A * np.sin(omega * t)                             # pitch X
+            phi   = A * np.sin(2.0 * omega * t) * 0.5               # yaw   Y
+            psi   = A * np.sin(2.0 * omega * t) * np.sin(omega * t) * 0.5  # roll Z
 
-            # Combined rotation: cube rotates around the fixed interior camera
-            R = self._Rz(psi) @ self._Ry(phi) @ self._Rx(theta)
+            # Base rotation: orient camera toward the (+X,+Y,+Z) corner
+            # yaw 45° right + pitch 35.26° up = look at (1,1,1)/sqrt(3)
+            R_base = self._Ry(np.deg2rad(45.0)) @ self._Rx(np.deg2rad(-35.26))
 
-            # --- Interior face definitions ---
-            # Each face is a quad of 4 corners wound so that
-            # cross(v1-v0, v3-v0) points OUTWARD from cube centre.
-            # A face is VISIBLE from inside when its outward normal,
-            # after rotation, has NEGATIVE Z (faces into the camera).
+            # Lemniscate oscillation applied on top of the base orientation
+            R_lemni = self._Rz(psi) @ self._Ry(phi) @ self._Rx(theta)
+
+            # Final rotation: base then oscillate.
+            # R_inv (transpose) transforms world rays into cube-local space.
+            R     = R_base @ R_lemni
+            R_inv = R.T  # orthogonal matrix: inverse = transpose
+
+            # --- Build per-pixel ray directions ---
+            Y_idx, X_idx = np.mgrid[0:h, 0:w]
+            rx = (X_idx - cx) / focal
+            ry = (Y_idx - cy) / focal
+            rz = np.ones((h, w), dtype=np.float64)
+
+            # Transform rays into cube-local space: (h*w, 3)
+            rays_flat  = np.stack([rx.ravel(), ry.ravel(), rz.ravel()], axis=1)
+            rays_local = (R_inv @ rays_flat.T).T.reshape(h, w, 3)
+
+            # --- Ray-cube intersection ---
+            # For each of 6 axis-aligned faces, compute the hit distance t and
+            # the UV coords. Track the nearest positive-t hit per pixel.
             #
-            # Winding order matches cv2 src_pts: TL → TR → BR → BL
+            # Face spec: (normal_axis, sign, u_tangent_axis, v_tangent_axis)
+            #   normal_axis: 0=X, 1=Y, 2=Z
+            #   sign:        +1 or -1 (which side of the axis)
+            #   u/v axes:    the two remaining axes used for UV coords
             faces = [
-                # +X  right wall
-                np.array([[ S, -S,  S],
-                           [ S, -S, -S],
-                           [ S,  S, -S],
-                           [ S,  S,  S]], dtype=np.float64),
-                # -X  left wall
-                np.array([[-S, -S, -S],
-                           [-S, -S,  S],
-                           [-S,  S,  S],
-                           [-S,  S, -S]], dtype=np.float64),
-                # +Y  floor
-                np.array([[-S,  S,  S],
-                           [ S,  S,  S],
-                           [ S,  S, -S],
-                           [-S,  S, -S]], dtype=np.float64),
-                # -Y  ceiling
-                np.array([[-S, -S, -S],
-                           [ S, -S, -S],
-                           [ S, -S,  S],
-                           [-S, -S,  S]], dtype=np.float64),
-                # +Z  front wall
-                np.array([[-S, -S,  S],
-                           [ S, -S,  S],
-                           [ S,  S,  S],
-                           [-S,  S,  S]], dtype=np.float64),
-                # -Z  back wall
-                np.array([[ S, -S, -S],
-                           [-S, -S, -S],
-                           [-S,  S, -S],
-                           [ S,  S, -S]], dtype=np.float64),
+                (0,  1, 2, 1),  # +X right wall   u=Z  v=Y
+                (0, -1, 2, 1),  # -X left wall    u=Z  v=Y
+                (1,  1, 0, 2),  # +Y floor        u=X  v=Z
+                (1, -1, 0, 2),  # -Y ceiling      u=X  v=Z
+                (2,  1, 0, 1),  # +Z front wall   u=X  v=Y
+                (2, -1, 0, 1),  # -Z back wall    u=X  v=Y
             ]
 
-            # Source corners: TL → TR → BR → BL
-            src_pts = np.array([[0, 0], [w, 0], [w, h], [0, h]],
-                               dtype=np.float32)
+            best_t = np.full((h, w), np.inf)
+            result = np.zeros((h, w, 3), dtype=np.uint8)
+            eps = 1e-4
 
-            # Collect visible faces
-            visible = []
-            for verts in faces:
-                rot = (R @ verts.T).T          # shape (4, 3)
+            for axis, sign, u_ax, v_ax in faces:
 
-                # Outward normal (cross product of two edges)
-                normal = np.cross(rot[1] - rot[0], rot[3] - rot[0])
+                d = rays_local[..., axis]          # ray component along this axis
+                valid = np.abs(d) > eps            # avoid division by zero
 
-                # Interior visibility: outward normal must point INTO camera (neg Z)
-                if normal[2] >= 0:
-                    continue
+                # Distance to the face plane
+                t_hit = np.where(valid, (sign * S) / d, np.inf)
 
-                pts2d = self._project(rot, focal, cx, cy)
-                if pts2d is None:
-                    continue
+                # Intersection point
+                ix = rays_local[..., 0] * t_hit
+                iy = rays_local[..., 1] * t_hit
+                iz = rays_local[..., 2] * t_hit
 
-                mean_z = rot[:, 2].mean()
-                visible.append((mean_z, pts2d))
+                # Valid hit: t > 0 and intersection within face bounds
+                hit = (
+                    valid &
+                    (t_hit > 0) &
+                    (np.abs(ix) <= S + eps) &
+                    (np.abs(iy) <= S + eps) &
+                    (np.abs(iz) <= S + eps)
+                )
 
-            # Painter's algorithm: most-negative Z (farthest) drawn first
-            visible.sort(key=lambda x: x[0])
+                # UV — the two tangent-axis components, mapped [-S,S] → [0, dim-1]
+                inter = np.stack([ix, iy, iz], axis=-1)
+                u_world = inter[..., u_ax]
+                v_world = inter[..., v_ax]
 
-            canvas = np.zeros_like(frame)
-            for _, dst_pts in visible:
-                try:
-                    M = cv2.getPerspectiveTransform(src_pts, dst_pts)
-                    warped = cv2.warpPerspective(frame, M, (w, h))
-                    mask = np.any(warped > 0, axis=-1)
-                    canvas[mask] = warped[mask]
-                except cv2.error:
-                    continue
+                u_px = np.clip(((u_world + S) / (2.0 * S)) * (w - 1), 0, w - 1)
+                v_px = np.clip(((v_world + S) / (2.0 * S)) * (h - 1), 0, h - 1)
 
-            return canvas
+                # Keep nearest hit
+                update = hit & (t_hit < best_t)
+                best_t = np.where(update, t_hit, best_t)
+
+                u_int = u_px.astype(np.int32)
+                v_int = v_px.astype(np.int32)
+                result[update] = frame[v_int[update], u_int[update]]
+
+            return result
 
         return clip.transform(filter_frame)
