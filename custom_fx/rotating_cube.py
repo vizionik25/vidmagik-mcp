@@ -22,17 +22,24 @@ class RotatingCube(Effect):
 
     The camera is fixed at the origin inside the cube, aimed at the corner
     where three faces meet (+X right wall, +Y floor, +Z front wall).
-    All three rotation axes (pitch, yaw, roll) are driven from a single
-    speed value via the lemniscate equations.
+    Each rotation axis (pitch/X, yaw/Y, roll/Z) can be driven at an
+    independent speed, enabling true 3-axis independent motion.
 
     Parameters
     ----------
     speed : float
-        Base oscillation frequency in degrees/sec.
+        Base oscillation frequency in degrees/sec applied to all axes
+        unless overridden by speed_x / speed_y / speed_z.
     zoom : float
         Focal length multiplier. Higher = more telephoto, tighter corner.
     amplitude : float
-        Angular sweep in degrees — how far the figure-8 oscillates.
+        Angular sweep in degrees — how far each axis oscillates.
+    speed_x : float, optional
+        Independent pitch (X-axis) speed in degrees/sec. Overrides speed.
+    speed_y : float, optional
+        Independent yaw (Y-axis) speed in degrees/sec. Overrides speed.
+    speed_z : float, optional
+        Independent roll (Z-axis) speed in degrees/sec. Overrides speed.
     """
 
     def __init__(
@@ -40,14 +47,14 @@ class RotatingCube(Effect):
         speed: float = 45.0,
         zoom: float = 1.0,
         amplitude: float = 40.0,
-        # Legacy compat — silently absorbed
         speed_x: float = None,
         speed_y: float = None,
+        speed_z: float = None,
     ):
-        if speed_x is not None or speed_y is not None:
-            self.speed = max(abs(speed_x or 0), abs(speed_y or 0), 1.0)
-        else:
-            self.speed = max(abs(speed), 1.0)
+        base = max(abs(speed), 1.0)
+        self.speed_x = max(abs(speed_x), 1.0) if speed_x is not None else base
+        self.speed_y = max(abs(speed_y), 1.0) if speed_y is not None else base
+        self.speed_z = max(abs(speed_z), 1.0) if speed_z is not None else base
         self.zoom = zoom
         self.amplitude = np.deg2rad(amplitude)
 
@@ -84,13 +91,15 @@ class RotatingCube(Effect):
             focal = max(w, h) * self.zoom
             cx, cy = w * 0.5, h * 0.5
 
-            # --- 3-axis lemniscate angles ---
-            omega = np.deg2rad(self.speed)
+            # --- 3-axis independent angles ---
+            omega_x = np.deg2rad(self.speed_x)
+            omega_y = np.deg2rad(self.speed_y)
+            omega_z = np.deg2rad(self.speed_z)
             A = self.amplitude
 
-            theta = A * np.sin(omega * t)                             # pitch X
-            phi   = A * np.sin(2.0 * omega * t) * 0.5               # yaw   Y
-            psi   = A * np.sin(2.0 * omega * t) * np.sin(omega * t) * 0.5  # roll Z
+            theta = A * np.sin(omega_x * t)          # pitch X
+            phi   = A * np.sin(omega_y * t) * 0.5   # yaw   Y
+            psi   = A * np.sin(omega_z * t) * 0.5   # roll  Z
 
             # Base rotation: orient camera toward the (+X,+Y,+Z) corner
             # yaw 45° right + pitch 35.26° up = look at (1,1,1)/sqrt(3)

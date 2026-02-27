@@ -1,5 +1,7 @@
 from fastmcp import FastMCP
 from fastmcp.server.transforms import PromptsAsTools
+from fastmcp.tools import Tool, tool as standalone_tool
+from fastmcp.tools.tool_transform import ArgTransform
 from moviepy import *
 from moviepy.video.tools.drawing import color_gradient, color_split
 from moviepy.video.tools.cuts import detect_scenes, find_video_period
@@ -642,12 +644,23 @@ def vfx_clone_grid(clip_id: str, n_clones: int = 4) -> str:
     return register_clip(clip.with_effects([CloneGrid(n_clones)]))
 
 @mcp.tool
-def vfx_rotating_cube(clip_id: str, speed: float = 45, zoom: float = 1.0, amplitude: float = 40.0) -> str:
+def vfx_rotating_cube(
+    clip_id: str,
+    speed: float = 45,
+    zoom: float = 1.0,
+    amplitude: float = 40.0,
+    speed_x: float = None,
+    speed_y: float = None,
+    speed_z: float = None,
+) -> str:
     """Simulates an interior perspective of a cube rotating in a figure-8 (lemniscate) pattern.
     The viewer is inside the cube looking at a corner where 3 faces meet.
-    All 3 rotation axes (pitch, yaw, roll) are driven from a single speed value."""
+    speed is a global fallback; speed_x/speed_y/speed_z override per axis."""
     clip = get_clip(clip_id)
-    return register_clip(clip.with_effects([RotatingCube(speed=speed, zoom=zoom, amplitude=amplitude)]))
+    return register_clip(clip.with_effects([RotatingCube(
+        speed=speed, zoom=zoom, amplitude=amplitude,
+        speed_x=speed_x, speed_y=speed_y, speed_z=speed_z
+    )]))
 
 
 @mcp.tool
@@ -668,6 +681,47 @@ def vfx_typewriter(clip_id: str, chars_per_second: float = 10, delay: float = 0)
     clip = get_clip(clip_id)
     effect = TypeWriter(chars_per_second=chars_per_second, delay=delay)
     return register_clip(effect.apply(clip))
+
+# --- Tool Composition via toolTransforms ---
+
+@standalone_tool
+def _psychedelic_cube_base(
+    clip_id: str,
+    n_slices: int = 6,
+    speed: float = 45.0,
+    zoom: float = 1.0,
+    amplitude: float = 40.0,
+    speed_x: float = None,
+    speed_y: float = None,
+    speed_z: float = None,
+    _x: int = None,
+    _y: int = None,
+) -> str:
+    """Base implementation: applies Kaleidoscope then RotatingCube with per-axis speeds."""
+    clip = get_clip(clip_id)
+    mid_id = register_clip(clip.with_effects([Kaleidoscope(n_slices, _x, _y)]))
+    clip2 = get_clip(mid_id)
+    return register_clip(clip2.with_effects([RotatingCube(
+        speed=speed, zoom=zoom, amplitude=amplitude,
+        speed_x=speed_x, speed_y=speed_y, speed_z=speed_z
+    )]))
+
+# Build the public-facing combo tool — hides the internal x/y centering args
+_psychedelic_cube_tool = Tool.from_tool(
+    _psychedelic_cube_base,
+    name="vfx_psychedelic_cube",
+    description=(
+        "Apply a kaleidoscope effect followed by a rotating cube effect in a single step. "
+        "Creates a psychedelic, infinitely-spinning interior-cube look. "
+        "n_slices controls the number of kaleidoscope mirror segments; "
+        "speed, zoom, and amplitude control the cube's rotation."
+    ),
+    transform_args={
+        "_x": ArgTransform(hide=True, default=None),
+        "_y": ArgTransform(hide=True, default=None),
+    },
+)
+mcp.add_tool(_psychedelic_cube_tool)
 
 @mcp.tool
 def vfx_resize(clip_id: str, width: int = None, height: int = None, scale: float = None) -> str:
