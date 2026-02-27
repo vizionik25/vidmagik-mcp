@@ -723,6 +723,40 @@ _psychedelic_cube_tool = Tool.from_tool(
     },
 )
 mcp.add_tool(_psychedelic_cube_tool)
+vfx_psychedelic_cube = _psychedelic_cube_base  # public alias for testing & direct use
+
+# --- vfx_glitch_mirror: Matrix → RGBSync → QuadMirror → MultiplyColor ---
+
+@mcp.tool
+def vfx_glitch_mirror(
+    clip_id: str,
+    matrix_speed: float = 150.0,
+    matrix_density: float = 0.2,
+    matrix_color: str = "green",
+    chars: str = "0123456789ABCDEF",
+    font_size: int = 16,
+    r_offset: list[int] = (0, 0),
+    g_offset: list[int] = (0, 0),
+    b_offset: list[int] = (0, 0),
+    r_time_offset: float = 0.0,
+    g_time_offset: float = 0.0,
+    b_time_offset: float = 0.0,
+    qm_x: Optional[int] = None,
+    qm_y: Optional[int] = None,
+    factor: float = 1.2,
+) -> str:
+    """Chain Matrix digital rain → RGB chromatic sync/split → quad mirror → color multiply in a single step.
+    matrix_speed/density/color/chars/font_size control the rain; r/g/b_offset and time offsets control chromatic split;
+    qm_x/qm_y set the quad mirror center; factor brightens or dims the result."""
+    clip = get_clip(clip_id)
+    c1 = register_clip(clip.with_effects([Matrix(matrix_speed, matrix_density, chars, matrix_color, font_size)]))
+    c2 = register_clip(get_clip(c1).with_effects([RGBSync(
+        tuple(r_offset), tuple(g_offset), tuple(b_offset),
+        r_time_offset, g_time_offset, b_time_offset
+    )]))
+    c3 = register_clip(get_clip(c2).with_effects([QuadMirror(qm_x, qm_y)]))
+    return register_clip(get_clip(c3).with_effects([vfx.MultiplyColor(factor)]))
+
 
 @mcp.tool
 def vfx_resize(clip_id: str, width: int = None, height: int = None, scale: float = None) -> str:

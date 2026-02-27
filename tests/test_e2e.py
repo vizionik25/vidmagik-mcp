@@ -58,6 +58,7 @@ from main import (
     vfx_resize, vfx_rgb_sync, vfx_rotating_cube, vfx_rotate, vfx_scroll,
     vfx_slide_in, vfx_slide_out, vfx_supersample, vfx_time_mirror,
     vfx_time_symmetrize, vfx_auto_framing, vfx_typewriter,
+    vfx_psychedelic_cube, vfx_glitch_mirror,
     tools_detect_scenes, tools_find_video_period, tools_find_audio_period,
     tools_drawing_color_gradient, tools_drawing_color_split, tools_file_to_subtitles,
     tools_check_installation, list_available_fonts,
@@ -496,8 +497,12 @@ class TestCustomVFX:
         vfx_clone_grid(self.cid, n_clones=4)
 
     def test_vfx_rotating_cube(self):
+        # Global speed fallback
         vfx_rotating_cube(self.cid, speed=90)
-        vfx_rotating_cube(self.cid, direction="vertical", zoom=1.5)
+        # Per-axis independent speeds — the key new feature
+        vfx_rotating_cube(self.cid, speed_x=20, speed_y=60, speed_z=10)
+        # Mix: global speed + override one axis
+        vfx_rotating_cube(self.cid, speed=45, speed_z=90, zoom=1.5, amplitude=30)
 
     def test_vfx_kaleidoscope_cube(self):
         from custom_fx.kaleidoscope_cube import KaleidoscopeCube
@@ -517,6 +522,51 @@ class TestCustomVFX:
         # Mock TextClip for typewriter
         with patch("main.TextClip"):
             vfx_typewriter(self.cid)
+
+    def test_vfx_psychedelic_cube(self):
+        """vfx_psychedelic_cube: kaleidoscope → rotating_cube combo via toolTransforms."""
+        cid = _color(duration=0.5, size=(20, 20), color=(80, 0, 180))
+        # Default params
+        vfx_psychedelic_cube(cid)
+        # Explicit n_slices + per-axis speeds
+        vfx_psychedelic_cube(
+            cid,
+            n_slices=8,
+            speed=30,
+            speed_x=20,
+            speed_y=50,
+            speed_z=15,
+            zoom=1.1,
+            amplitude=45,
+        )
+        # Only global speed (no per-axis override)
+        vfx_psychedelic_cube(cid, n_slices=4, speed=60, zoom=0.8)
+
+    def test_vfx_glitch_mirror(self):
+        """vfx_glitch_mirror: Matrix → RGBSync → QuadMirror → MultiplyColor combo."""
+        cid = _color(duration=0.5, size=(20, 20), color=(0, 200, 100))
+        # Default params
+        vfx_glitch_mirror(cid)
+        # Explicit params for all effects in the chain
+        vfx_glitch_mirror(
+            cid,
+            matrix_speed=200,
+            matrix_density=0.3,
+            matrix_color="green",
+            chars="01",
+            font_size=8,
+            r_offset=[3, 0],
+            g_offset=[0, 3],
+            b_offset=[-3, 0],
+            r_time_offset=0.05,
+            g_time_offset=0.0,
+            b_time_offset=-0.05,
+            qm_x=10,
+            qm_y=10,
+            factor=1.5,
+        )
+        # factor < 1 (darken)
+        vfx_glitch_mirror(cid, factor=0.6)
 
 
 # ---------------------------------------------------------------------------
