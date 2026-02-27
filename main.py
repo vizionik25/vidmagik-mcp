@@ -162,6 +162,15 @@ def text_clip(
         if "ImageMagick" in str(e) or "convert" in str(e):
             raise RuntimeError("ImageMagick is required for TextClip. Please ensure it is installed and configured.")
         raise
+    
+    # Explicitly attach metadata for effects to access
+    clip.text = text
+    clip.font = font
+    clip.font_size = font_size
+    clip.color = color
+    clip.bg_color = bg_color
+    clip.method = method
+    
     return register_clip(clip)
 
 @mcp.tool
@@ -207,7 +216,7 @@ def subtitles_clip(filename: str, encoding: str = "utf-8", font: str = "Arial", 
     filename = validate_path(filename)
     if not os.path.exists(filename):
         raise FileNotFoundError(f"File {filename} not found.")
-    generator = lambda txt: TextClip(txt, font=font, font_size=font_size, color=color)
+    generator = lambda txt: TextClip(text=txt, font=font, font_size=font_size, color=color)
     clip = SubtitlesClip(filename, make_textclip=generator, encoding=encoding)
     return register_clip(clip)
 

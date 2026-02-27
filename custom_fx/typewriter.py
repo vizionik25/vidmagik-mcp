@@ -110,30 +110,29 @@ class TypeWriter(Effect):
         
         clips = []
         
+        # Collect attributes from original clip
+        font = getattr(clip, 'font', None)
+        font_size = getattr(clip, 'font_size', None)
+        color = getattr(clip, 'color', 'black')
+        bg_color = getattr(clip, 'bg_color', None)
+        size = getattr(clip, 'size', (None, None))
+        method = getattr(clip, 'method', 'label')
+
         # For each character progression, create a text clip
         for i in range(1, total_chars + 1):
             partial_text = original_text[:i]
             start_time = self.delay + (i - 1) * char_duration
             
-            # Create a text clip with the partial text
-            txt_clip = TextClip(partial_text)
-            
-            # Copy properties from original clip
-            if hasattr(clip, 'font'):
-                txt_clip = TextClip(partial_text, font=clip.font)
-            if hasattr(clip, 'font_size'):
-                txt_clip = TextClip(
-                    partial_text, 
-                    font=getattr(clip, 'font', None),
-                    font_size=clip.font_size
-                )
-            if hasattr(clip, 'color'):
-                txt_clip = TextClip(
-                    partial_text,
-                    font=getattr(clip, 'font', None),
-                    font_size=getattr(clip, 'font_size', None),
-                    color=clip.color
-                )
+            # Create a text clip with explicit keyword arguments to avoid signature mismatches
+            txt_clip = TextClip(
+                font=font,
+                text=partial_text,
+                font_size=font_size,
+                color=color,
+                bg_color=bg_color,
+                size=size,
+                method=method
+            )
             
             txt_clip = txt_clip.with_duration(char_duration).with_start(start_time)
             
