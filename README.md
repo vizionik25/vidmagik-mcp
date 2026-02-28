@@ -4,20 +4,31 @@
 [![Python](https://img.shields.io/badge/Python-3.12+-green.svg)](https://www.python.org/)
 [![MoviePy](https://img.shields.io/badge/MoviePy-2.2+-orange.svg)](https://zulko.github.io/moviepy/)
 [![Deployed on Fly.io](https://img.shields.io/badge/Deployed%20on-Fly.io-blueviolet)](https://fly.io)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-A Model Context Protocol (MCP) server that provides a comprehensive interface to [MoviePy](https://zulko.github.io/moviepy/) for AI-driven video editing. Hosted remotely on **Fly.io** using Streamable HTTP transport.
+A powerful Model Context Protocol (MCP) server providing a comprehensive interface to [MoviePy](https://zulko.github.io/moviepy/) for AI-driven video editing. Hosted remotely on **Fly.io** using Streamable HTTP transport, enabling seamless integration with AI agents and video editing workflows.
 
-- **90 MCP tools** — clip management, effects, compositing, audio, analysis, file upload & download
+## Features
+
+- **90+ MCP tools** — clip management, effects, compositing, audio processing, analysis, and file I/O
 - **8 prompt templates** — built-in workflow guides for common video editing tasks
-- **3 HTTP endpoints** — file upload UI, binary upload receiver, file download
+- **11 custom effects** — Matrix rain, kaleidoscope, chroma key, auto-framing, glitch effects, and more
+- **3 HTTP endpoints** — browser-based file upload UI, binary upload receiver, and file download
+- **GitHub OAuth authentication** — secure remote access with GitHub credentials
+- **Fly.io deployment** — production-ready hosting with session persistence and automatic scaling
+- **Full FFmpeg integration** — high-quality video encoding and audio processing
+- **Memory-efficient** — max 30 clips per session with stash/unstash for large projects
 
 ---
 
 ## Table of Contents
 
+- [Quick Start](#quick-start)
 - [Deployment (Fly.io)](#deployment-flyio)
 - [Local Development](#local-development)
+- [Environment Configuration](#environment-configuration)
 - [MCP Client Configuration](#mcp-client-configuration)
+- [Architecture & State Management](#architecture--state-management)
 - [File Upload & Download Flow](#file-upload--download-flow)
 - [HTTP Endpoints](#http-endpoints)
 - [Tools Reference](#tools-reference)
@@ -29,8 +40,58 @@ A Model Context Protocol (MCP) server that provides a comprehensive interface to
   - [Audio Effects (afx)](#audio-effects-afx)
   - [Analysis & Utilities](#analysis--utilities)
   - [File Upload & Download](#file-upload--download)
+- [Custom Effects](#custom-effects)
 - [Prompt Templates](#prompt-templates)
-- [State Management](#state-management)
+- [Project Structure](#project-structure)
+- [Troubleshooting](#troubleshooting)
+- [Contributing](#contributing)
+- [License](#license)
+
+---
+
+## Quick Start
+
+### For AI Agents (Remote)
+
+```json
+// Add to your MCP client config (e.g. Claude.app/cline)
+{
+  "mcpServers": {
+    "vidmagik": {
+      "serverUrl": "https://vidmagik-mcp.fly.dev/mcp"
+    }
+  }
+}
+```
+
+**Proper workflow to prompt the agent:**
+> "Use the vidmagik tools to create a glitch effect on my video located at /abs/path/to/local/file"
+
+The agent flow:
+1. Use browser control tool to open the MCP file picker page
+2. Select the video file from your local system (agent gets absolute path)
+3. Pass the path to vidmagik tools to process
+4. Tools automatically fetch download URL after rendering
+5. Agent provides download link for you to retrieve the processed video
+
+### For Local Development
+
+```bash
+git clone https://github.com/vizionik25/vidmagik-mcp.git
+cd vidmagik-mcp
+uv sync
+uv run main.py
+```
+
+Your local server runs at `http://localhost:8000` (stdio transport by default).
+
+### Docker
+
+```bash
+docker compose up --build
+```
+
+Files in `./media/` are accessible at `/app/media` inside the container.
 
 ---
 
@@ -70,7 +131,7 @@ https://vidmagik-mcp.fly.dev/mcp
 ```toml
 [http_service]
   internal_port = 8080
-  auto_stop_machines = false   # keep alive; ephemeral storage clears on suspend/redeploy
+  auto_stop_machines = false   # keep alive; ephemeral storage clears on redeploy
   min_machines_running = 1
 
   [http_service.http_options]
@@ -84,7 +145,7 @@ https://vidmagik-mcp.fly.dev/mcp
     name = "mcp-session-id"   # pins sessions to the same machine via fly-replay caching
 ```
 
-> **Ephemeral storage** — uploaded files and rendered outputs live only in the container's filesystem. They are wiped on each `fly deploy` or when the machine suspends due to inactivity. Download your output files before redeploying.
+> **Ephemeral storage** — uploaded files and rendered outputs live only in the container's filesystem. They are wiped on each `fly deploy` when the server updates. Download your output files before redeploying.
 
 ---
 
@@ -113,11 +174,10 @@ uv sync
 uv run main.py
 
 # HTTP transport
-uv run main.py --transport http --host 0.0.0.0 --port 8080
-
-# SSE transport
-uv run main.py --transport sse --host 0.0.0.0 --port 8080
+uv run uvicorn main:app --host 0.0.0.0 --port 8080
 ```
+
+> **Note:** SSE transport is only used automatically as a fallback if HTTP connection fails. It is never directly invoked by the user.
 
 ### Docker
 
@@ -126,6 +186,45 @@ docker compose up --build
 ```
 
 The `./media` directory is mounted to `/app/media` inside the container.
+
+---
+
+## Environment Configuration
+
+The server requires the following environment variables:
+
+### Required
+
+- **`GITHUB_CLIENT_ID`** — GitHub OAuth application ID  
+  Get from [github.com/settings/developers](https://github.com/settings/developers)
+- **`GITHUB_CLIENT_SECRET`** — GitHub OAuth application secret
+
+### Optional
+
+- **`SERVER_BASE_URL`** — Base URL for OAuth redirects (default: `http://localhost:8000`)  
+  Example: `https://vidmagik-mcp.fly.dev`
+
+### Setup GitHub OAuth (Local & Remote)
+
+1. Go to [github.com/settings/developers](https://github.com/settings/app-manifests) → **New OAuth App**
+2. Fill in:
+   - Application name: `vidmagik-mcp`
+   - Homepage URL: `http://localhost:8000` (or your Fly.io URL)
+   - Authorization callback URL: `http://localhost:8000/mcp/auth-callback` (or Fly.io equivalent)
+3. Copy **Client ID** and **Client Secret**
+4. Create a `.env` file in the project root:
+
+```env
+GITHUB_CLIENT_ID=your_client_id_here
+GITHUB_CLIENT_SECRET=your_client_secret_here
+SERVER_BASE_URL=http://localhost:8000
+```
+
+For **Fly.io**, set secrets via:
+
+```bash
+fly secrets set GITHUB_CLIENT_ID=xxx GITHUB_CLIENT_SECRET=yyy SERVER_BASE_URL=https://vidmagik-mcp.fly.dev
+```
 
 ---
 
@@ -157,27 +256,125 @@ The `./media` directory is mounted to `/app/media` inside the container.
 }
 ```
 
+### Docker Container (stdio)
+
+For running vidmagik-mcp in a Docker container:
+
+```json
+{
+  "mcpServers": {
+    "vidmagik-docker": {
+      "command": "docker",
+      "args": [
+        "run",
+        "--rm",
+        "-i",
+        "-v", "/path/to/local/media:/app/media",
+        "-e", "GITHUB_CLIENT_ID=your_client_id",
+        "-e", "GITHUB_CLIENT_SECRET=your_client_secret",
+        "-e", "SERVER_BASE_URL=http://localhost:8000",
+        "vidmagik-mcp:latest"
+      ]
+    }
+  }
+}
+```
+
+**Explanation:**
+- `"command": "docker"` — Use Docker CLI to launch the container
+- `"--rm"` — Automatically remove container when it exits
+- `"-i"` — Keep stdin open for stdio communication
+- `"-v"` — Mount local media directory so agent can access files
+- `"-e"` — Pass GitHub OAuth **user authentication** credentials (not API credentials). Users sign in with their GitHub accounts to access the MCP server
+- `"vidmagik-mcp:latest"` — Image name (build with `docker compose build`)
+
+**Prerequisites:**
+1. Build the image: `docker compose build`
+2. Set your GitHub OAuth credentials in the config
+3. Ensure local media directory exists: `mkdir -p /path/to/local/media`
+
+---
+
+## Architecture & State Management
+
+### Clip Lifecycle
+
+1. **Create** — Load a file or render content
+   ```
+   video_file_clip(filename) → clip_id
+   ```
+
+2. **Modify** — Apply effects, resize, crop, etc.
+   ```
+   vfx_fade_in(clip_id, duration=1) → clip_id  (returns modified clip)
+   ```
+
+3. **Compose** — Layer or concatenate clips
+   ```
+   composite_video_clips([clip_id1, clip_id2]) → composite_clip_id
+   ```
+
+4. **Output** — Render to file
+   ```
+   write_videofile(clip_id, "/app/output.mp4") → filename
+   ```
+
+5. **Fetch Download URL** — Get link for user (automatically called after write_videofile)
+   ```
+   get_download_url("/app/output.mp4") → https://vidmagik-mcp.fly.dev/download?file=output.mp4
+   ```
+
+### Memory Management
+
+- **Max clips per session**: 30  
+- **Stash/Unstash**: Move clips to disk to free RAM, restore later
+- **Session isolation**: Each MCP client gets its own in-memory CLIPS dict
+- **Ephemeral storage**: Files are lost on `fly deploy` (server updates)
+
+### Clip Types
+
+- `VideoFileClip` — video file (mp4, webm, etc.)
+- `ImageClip` — single image or sequence
+- `AudioFileClip` — audio track
+- `TextClip` — rendered text (requires ImageMagick)
+- `ColorClip` — solid color background
+- `CompositeVideoClip` — layered clips
+- `ConcatenateVideoClip` — joined clips
+
 ---
 
 ## File Upload & Download Flow
 
 Because the server runs remotely on Fly.io, files must be transferred over HTTP. The recommended agent workflow:
 
-### Upload
+### Agent-Driven File Upload & Processing
+
+1. Agent uses **browser control tool** to open the file picker page at the MCP server URL
+2. Agent selects file from local filesystem → receives absolute path
+3. Agent passes path to processing tools:
+   ```
+   video_id = video_file_clip("/abs/path/to/video.mp4")
+   glitched = vfx_rgb_sync(video_id, r_offset=(5,0), g_offset=(-5,0))
+   output_path = write_videofile(glitched, "/app/output.mp4")
+   ```
+4. **Automatic** — tools immediately call `get_download_url(output_path)` and provide the HTTPS link to agent
+5. Agent shares download link with user
+
+### Manual Upload (if browser tool unavailable)
 
 1. Call `request_file_upload()` → returns `{ session_id, upload_url }`
-2. Open `upload_url` in the browser (agent uses its browser tool, or user opens manually)
+2. Open `upload_url` in the browser manually
 3. Select or drag-and-drop the file — upload streams directly to the server
 4. Call `get_uploaded_file(session_id)` → returns the absolute server-side path
 5. Pass that path to `video_file_clip()`, `image_clip()`, etc.
 
-### Render & Download
+### Output & Download
 
-1. Call `write_videofile(clip_id, "/app/output.mp4")`
-2. Call `get_download_url("/app/output.mp4")` → returns the full URL
-3. Paste that URL into your browser — the file downloads automatically
+- When `write_videofile()` completes, it automatically provides the download URL
+- Agent can immediately pass this to user or embed in a message
+- User downloads file directly from the link (valid ~1 hour)
 
-> Files are wiped on the next `fly deploy` or after the machine suspends (~1 hour of inactivity).
+> **Note:** Files are wiped on the next `fly deploy` when the server updates. Download your files before redeploying.
 
 ---
 
@@ -362,6 +559,28 @@ All tools return a `clip_id` (UUID string) unless otherwise noted. Pass `clip_id
 
 ---
 
+## Custom Effects
+
+vidmagik includes **11 custom video effects** built on MoviePy  for the rendering then uses libraries like numpy and opencv for advanced complex mapping and tracking logic. See [CUSTOM_FX.md](CUSTOM_FX.md) for detailed documentation.
+
+### Built-in Custom FX Tools
+
+| Effect | Tool | Description |
+|--------|------|-------------|
+| **Matrix Digital Rain** | `vfx_matrix()` | Green/colored character rain overlay with customizable speed, density,charecter color and charecters used |
+| **Kaleidoscope** | `vfx_kaleidoscope()` | Radial symmetry mirror effect with adjustable center and slice count |
+| **Kaleidoscope + Cube** | `vfx_kaleidoscope_cube()` | Combines kaleidoscope with 3D-Like rotating cube for hybrid effect |
+| **RGB Glitch Split** | `vfx_rgb_sync()` | Chromatic aberration via RGB channel offsets (spatial & temporal) |
+| **Chroma Key** | `vfx_chroma_key()` | Advanced green screen with threshold and softness for transparency and key color selection |
+| **Auto Framing** | `vfx_auto_framing()` | Face/subject tracking auto-crop; converts 16:9 to 9:16 vertical video and tracks the focal point to ensure it stays in frame |
+| **Clone Grid** | `vfx_clone_grid()` | Tile clip into 2, 4, 8, 16, 32 or 64 grid of clones |
+| **Rotating Cube** | `vfx_rotating_cube()` | 3D-Like perspective cube with video on all six faces that has a figure 8 path of motion and adjustable speed and zoom and an interior point of view |
+| **Quad Mirror** | `vfx_quad_mirror()` | Four-way mirror symmetry using an x axis and y axis resulting in thre intersection to be the center point. creating a horizontal mirror that is then vertically mirrored |
+| **Typewriter** | `TypeWriter` | Sequential character reveal animation to bve used on text_clips only where each charecter is displayed one after another in sequence as though they were being typed out in real time  |
+| **Head Blur** | `vfx_head_blur()` | Animated blur tracking a path defined by math expressions this is the effect to use to blur or obscure a particular portion of a video like someones face it uses mathematical expressions to pinpoint the blur on the image and opencv to track its movements within the frame |
+
+---
+
 ## Prompt Templates
 
 8 built-in prompts guide the agent through common workflows:
@@ -377,18 +596,197 @@ All tools return a `clip_id` (UUID string) unless otherwise noted. Pass `clip_id
 | `demonstrate_kaleidoscope` | Radial symmetry kaleidoscope animation |
 | `demonstrate_kaleidoscope_cube` | Hybrid kaleidoscope + 3D cube combined effect |
 
+### Using Prompts
+
+Prompts are available to LLM clients and guide the agent through structured workflows. Example:
+
+```
+// Agent sees this when you ask about TikTok vertical video
+Prompt: auto_framing_for_tiktok
+Description: Convert horizontal 16:9 video to 9:16 vertical with face tracking
+→ Tool: vfx_auto_framing(target_aspect_ratio=0.5625, smoothing=0.9)
+```
+
 ---
 
-## State Management
+## Project Structure
 
-- **Clip IDs** — every tool that creates or modifies a clip returns a UUID string (`clip_id`)
-- **Chaining** — pass `clip_id` to subsequent tools to build pipelines
-- **Memory** — clips are stored in-memory on the server; max 30 clips per session
-- **Cleanup** — use `delete_clip(clip_id)` to free a single clip, or `purge_clips()` to wipe all clips at once
-- **Persistence** — no persistent storage; all clips and files are lost on redeploy or machine suspend
+```
+vidmagik-mcp/
+├── main.py                      # FastMCP server, all 90+ tools, HTTP routes
+├── pyproject.toml              # Python dependencies (moviepy, fastmcp, etc.)
+├── Dockerfile                  # Production image build
+├── docker-compose.yml          # Local development docker setup
+├── fly.toml                    # Fly.io deployment config (16GB 8-core machine)
+│
+├── custom_fx/                  # 11 custom video effects
+│   ├── __init__.py
+│   ├── matrix.py              # Digital rain overlay
+│   ├── kaleidoscope.py        # Radial symmetry
+│   ├── kaleidoscope_cube.py   # Kaleidoscope + 3D cube
+│   ├── rgb_sync.py            # Glitch / chromatic aberration
+│   ├── chroma_key.py          # Green screen
+│   ├── auto_framing.py        # Face tracking & vertical crop
+│   ├── clone_grid.py          # Grid clones
+│   ├── rotating_cube.py       # 3D cube effect
+│   ├── quad_mirror.py         # Four-way mirror
+│   └── typewriter.py          # Text reveal animation
+│
+├── fonts/                      # Font files for text rendering
+├── tests/
+│   └── test_e2e.py            # ~1100 line end-to-end test suite
+├── CUSTOM_FX.md               # Detailed effect documentation
+├── README.md                  # This file
+└── LICENSE                    # MIT
+```
+
+---
+
+## Troubleshooting
+
+### `ImportError: No module named 'moviepy'`
+
+Install dependencies:
+```bash
+uv sync
+```
+
+### `MoviePy error: MOVIEPY_FFMPEG_PATH not found`
+
+Ensure FFmpeg is installed:
+```bash
+# macOS
+brew install ffmpeg
+
+# Ubuntu/Debian
+apt install ffmpeg
+
+# Verify
+ffmpeg -version
+```
+
+### TextClip or text rendering fails
+
+ImageMagick must be installed and properly configured:
+
+```bash
+# macOS
+brew install imagemagick
+
+# Ubuntu/Debian
+apt install imagemagick
+
+# Diagnose
+convert -version
+```
+
+If ImageMagick policy blocks text operations:
+```bash
+# Fix policy.xml (Linux)
+sed -i 's/domain="path" rights="none"/domain="path" rights="read|write"/g' /etc/ImageMagick-6/policy.xml
+```
+
+The Dockerfile includes this fix automatically.
+
+### `RuntimeError: Maximum number of clips (30) reached`
+
+Clips are stored in memory. Free space:
+```
+delete_clip(clip_id)        # Free one specific clip
+purge_clips()               # Clear all clips
+
+stash_clip(clip_id)         # Move to disk temporarily
+unstash_clip(stash_id)      # Restore from disk
+```
+
+### Files disappear after deploying to Fly.io
+
+Storage is ephemeral (container-local). **Download files before redeploying:**
+
+```python
+write_videofile(clip_id, "/app/output.mp4")
+url = get_download_url("/app/output.mp4")
+# → Paste URL in browser to download immediately
+```
+
+### Session not found (Fly.io)
+
+The server must run on exactly **1 machine**. Check:
+```bash
+fly scale count 1 --app vidmagik-mcp
+```
+
+If scaling up, session IDs won't persist across machines (Streamable HTTP is per-machine).
+
+### GitHub OAuth fails
+
+1. Verify environment variables:
+   ```bash
+   fly secrets list
+   # Should show GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET, SERVER_BASE_URL
+   ```
+
+2. Check redirect URL in [github.com/settings/developers](https://github.com/settings/developers):
+   - Should match `SERVER_BASE_URL + /mcp/auth-callback`
+   - Example: `https://vidmagik-mcp.fly.dev/mcp/auth-callback`
+
+3. Test locally:
+   ```bash
+   export GITHUB_CLIENT_ID=xxx
+   export GITHUB_CLIENT_SECRET=yyy
+   uv run main.py
+   ```
+
+---
+
+## Contributing
+
+### Running Tests
+
+```bash
+pytest tests/test_e2e.py -v
+```
+
+### Adding a Custom Effect
+
+1. Create a new effect class in `custom_fx/new_effect.py`. Refer to existing effects in `custom_fx/` (e.g., `matrix.py`, `kaleidoscope.py`) as implementation examples.
+
+2. Export in `custom_fx/__init__.py`:
+   ```python
+   from .new_effect import MyEffect
+   ```
+
+3. Add a wrapper tool in `main.py`:
+   ```python
+   @mcp.tool
+   def vfx_my_effect(clip_id: str, param1, param2):
+       """Description of my effect."""
+       clip = get_clip(clip_id)
+       effect = MyEffect(clip, param1, param2)
+       return register_clip(effect)
+   ```
+
+4. Add tests in `tests/test_e2e.py` (see existing custom FX tests).
+
+5. Document in [CUSTOM_FX.md](CUSTOM_FX.md).
+
+### Deployment Checklist
+
+Before `fly launch`:
+
+- [ ] All tests pass: `pytest tests/test_e2e.py`
+- [ ] No untracked files: `git status`
+- [ ] Secrets set: `fly secrets list` includes `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `SERVER_BASE_URL`
+- [ ] Machine count verified: `fly scale count 1`
+
+It's Best Practice to use checklist before re-deploy also. Remember everytime you deploy to use the '--ha=false'
+flag or Fly will spin up 2 machines and when you try to refresh youll get an error about non-matching sessions.
+this is due to moviepy only renders from within emphereal storage (memory) and since this is deployed remotely and not meant for storing our files only workaround to this is not feasiable due resource costs unless you were build something with the intentions of offering as part of some SaaS or Hosted Agent/s Product.
 
 ---
 
 ## License
 
-MIT
+MIT — See [LICENSE](LICENSE) for details.
+
+
