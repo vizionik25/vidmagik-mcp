@@ -1,47 +1,74 @@
+# FastMCP imports
 from fastmcp import FastMCP, Context
 from fastmcp.server.event_store import EventStore
 from fastmcp.server.transforms import PromptsAsTools
 from fastmcp.server.transforms import ResourcesAsTools
 from fastmcp.tools import Tool, tool as standalone_tool
 from fastmcp.tools.tool_transform import ArgTransform
+from fastmcp.server.auth.providers.github import GitHubProvider
+
+# Typing imports
 from typing import Optional
+
+# MoviePy imports
 from moviepy import *
 from moviepy.video.tools.drawing import color_gradient, color_split
 from moviepy.video.tools.cuts import detect_scenes, find_video_period
 from moviepy.video.io.ffmpeg_tools import ffmpeg_extract_subclip
 from moviepy.video.tools.subtitles import file_to_subtitles, SubtitlesClip
 from moviepy.video.tools.credits import CreditsClip
-from fastmcp.server.auth.providers.github import GitHubProvider
+
+# Starlette imports
 from starlette.applications import Starlette
 from starlette.routing import Mount
-import os
 import uvicorn
+
+# System imports
+import os
 import shutil
 import uuid
 import numpy as np
 import numexpr
-from custom_fx import *
-import argparse
 import sys
 from dotenv import load_dotenv
+from pathlib import Path
+import json
+
+# Custom FX imports
+from custom_fx import (
+    QuadMirror, 
+    ChromaKey, 
+    RGBSync, 
+    Kaleidoscope, 
+    Matrix, 
+    AutoFraming, 
+    CloneGrid, 
+    RotatingCube, 
+    KaleidoscopeCube, 
+    TypeWriter
+)
 
 load_dotenv()
 
-
-
+# Global variables
 CLIPS = {}
 STASH = {}
 MAX_CLIPS = 30
-FONT_PATH = os.path.join(os.getcwd(), "fonts")
-STASH_DIR = os.path.join("/tmp", "vidmagik_stash")
+CWD = os.getcwd()
+FONT_PATH = os.path.join("CWD", "/fonts")
+STASH_DIR = os.path.join("/tmp", "/vidmagik_stash")
+
 # Define routing structure
-ROOT_URL = os.environ.get("SERVER_BASE_URL", "http://localhost:8000")
-MOUNT_PREFIX = ""
+SERVER_BASE_URL = os.getenv("SERVER_BASE_URL")
+ROOT_URL = SERVER_BASE_URL.rstrip("/")
 MCP_PATH = "/mcp"
+
 
 #-------- AUTH ----------
 # Optional: Add Github OAuth provider for authentication
 # Set these environment variables to enable it
+#------------------------
+
 client_id = os.environ.get("GITHUB_CLIENT_ID")
 client_secret = os.environ.get("GITHUB_CLIENT_SECRET")
 
@@ -49,23 +76,27 @@ if client_id and client_secret:
     auth = GitHubProvider(
         client_id=client_id,
         client_secret=client_secret,
-        base_url=f"{ROOT_URL}{MOUNT_PREFIX}",
+        base_url=f"{ROOT_URL}",
     )
     mcp = FastMCP("vidmagik-mcp", auth=auth)
 else:
-    raise ValueError("GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET must be set to run this server. Running without OAuth is not permitted.")
+    raise ValueError(
+        "GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET must be set to run this server. "
+        "Running without OAuth is not permitted for the remote deployment. "
+        "Please set these environment variables to run this server. Or clone the main "
+        "repo and run this server locally."
+    )
 
-# --- Clip Management ---
+
+# --- Clip Management Tools ---
 
 @mcp.tool
 def validate_path(filename: str):
     """Basic path validation to prevent traversal outside the project directory or temp."""
     abs_path = os.path.abspath(filename)
-    cwd = os.getcwd()
+    cwd = CWD
     tmp = "/tmp" # Generic tmp for linux
     if not (abs_path.startswith(cwd) or abs_path.startswith(tmp)):
-         # In a real production system, this would be stricter.
-         # For this MCP, we'll allow paths within the CWD.
          pass
     return filename
 
@@ -104,8 +135,8 @@ def delete_clip(clip_id: str) -> str:
 
 @mcp.tool
 def purge_clips() -> str:
-    """Delete ALL clips currently loaded in memory and confirm the result.
-
+    """
+    Delete ALL clips currently loaded in memory and confirm the result.
     Equivalent to calling list_clips, then delete_clip on every clip, then
     list_clips again to verify. Returns a summary of what was removed.
     """
@@ -130,8 +161,10 @@ def purge_clips() -> str:
 
 @mcp.tool
 def stash_clip(clip_id: str, fps: float = 24) -> str:
-    """Move a clip out of active memory to temporary disk storage, freeing RAM.
-    Returns a stash_id to restore it later with unstash_clip."""
+    """
+    Move a clip out of system memory to temporary disk storage, freeing RAM.
+    Returns a stash_id to restore it later with unstash_clip.
+    """
     clip = get_clip(clip_id)
     os.makedirs(STASH_DIR, exist_ok=True)
     stash_id = str(uuid.uuid4())
@@ -148,8 +181,10 @@ def stash_clip(clip_id: str, fps: float = 24) -> str:
 
 @mcp.tool
 def unstash_clip(stash_id: str) -> str:
-    """Restore a stashed clip back into active memory. Returns a new clip_id.
-    The stash slot is cleared after restoration."""
+    """
+    Restore a stashed clip back into active memory. Returns a new clip_id.
+    The stash slot is cleared after restoration.
+    """
     if stash_id not in STASH:
         raise ValueError(f"Stash ID '{stash_id}' not found. Use list_stashed_clips to see available stash IDs.")
     path = STASH[stash_id]
@@ -191,7 +226,12 @@ def purge_stash() -> str:
 # --- Video IO ---
 
 @mcp.tool
-def video_file_clip(filename: str, audio: bool = True, fps_source: str = "fps", target_resolution: list[int] = None) -> str:
+def video_file_clip(
+    filename: str, 
+    audio: bool = True, 
+    fps_source: str = "fps", 
+    target_resolution: list[int] = None
+) -> str:
     """Load a video file."""
     filename = validate_path(filename)
     if not os.path.exists(filename):
@@ -205,7 +245,11 @@ def video_file_clip(filename: str, audio: bool = True, fps_source: str = "fps", 
     return register_clip(clip)
 
 @mcp.tool
-def image_clip(filename: str, duration: float = None, transparent: bool = True) -> str:
+def image_clip(
+    filename: str, 
+    duration: float = None, 
+    transparent: bool = True
+) -> str:
     """Load an image file."""
     filename = validate_path(filename)
     if not os.path.exists(filename):
@@ -216,7 +260,12 @@ def image_clip(filename: str, duration: float = None, transparent: bool = True) 
     return register_clip(clip)
 
 @mcp.tool
-def image_sequence_clip(sequence: list[str], fps: float = None, durations: list[float] = None, with_mask: bool = True) -> str:
+def image_sequence_clip(
+    sequence: list[str], 
+    fps: float = None, 
+    durations: list[float] = None, 
+    with_mask: bool = True
+) -> str:
     """Create a clip from a sequence of images or a folder path."""
     if not sequence:
         raise ValueError("Sequence cannot be empty.")
@@ -273,7 +322,11 @@ def text_clip(
     return register_clip(clip)
 
 @mcp.tool
-def color_clip(size: list[int], color: list[int], duration: float = None) -> str:
+def color_clip(
+    size: list[int], 
+    color: list[int], 
+    duration: float = None
+) -> str:
     """Create a solid color clip."""
     if duration is not None and duration <= 0:
         raise ValueError("Duration must be positive.")
@@ -310,7 +363,13 @@ def credits_clip(
     return register_clip(clip)
 
 @mcp.tool
-def subtitles_clip(filename: str, encoding: str = "utf-8", font: str = "Arial", font_size: int = 24, color: str = "white") -> str:
+def subtitles_clip(
+    filename: str,
+    encoding: str = "utf-8",
+    font: str = "Arial",
+    font_size: int = 24,
+    color: str = "white"
+) -> str:
     """Create a subtitles clip from a .srt file."""
     filename = validate_path(filename)
     if not os.path.exists(filename):
@@ -347,7 +406,12 @@ def write_videofile(
     return f"Successfully wrote video to {filename}"
 
 @mcp.tool
-def tools_ffmpeg_extract_subclip(filename: str, start_time: float, end_time: float, targetname: str = None) -> str:
+def tools_ffmpeg_extract_subclip(
+    filename: str,
+    start_time: float,
+    end_time: float,
+    targetname: str = None
+) -> str:
     """Fast extraction of a subclip using ffmpeg (no decoding)."""
     filename = validate_path(filename)
     if not os.path.exists(filename):
@@ -362,7 +426,10 @@ def tools_ffmpeg_extract_subclip(filename: str, start_time: float, end_time: flo
 # --- Audio IO ---
 
 @mcp.tool
-def audio_file_clip(filename: str, buffersize: int = 200000) -> str:
+def audio_file_clip(
+    filename: str,
+    buffersize: int = 200000
+) -> str:
     """Load an audio file."""
     filename = validate_path(filename)
     if not os.path.exists(filename):
@@ -394,7 +461,13 @@ def write_audiofile(
 # --- Clip Configuration ---
 
 @mcp.tool
-def set_position(clip_id: str, x: int = None, y: int = None, pos_str: str = None, relative: bool = False) -> str:
+def set_position(
+    clip_id: str,
+    x: int = None,
+    y: int = None,
+    pos_str: str = None,
+    relative: bool = False
+) -> str:
     """Set clip position. Use x/y for pixels, or pos_str for 'center', 'left', etc."""
     clip = get_clip(clip_id)
     if pos_str:
@@ -410,33 +483,48 @@ def set_position(clip_id: str, x: int = None, y: int = None, pos_str: str = None
     return register_clip(clip.with_position(pos, relative=relative))
 
 @mcp.tool
-def set_audio(clip_id: str, audio_clip_id: str) -> str:
+def set_audio(
+    clip_id: str,
+    audio_clip_id: str
+) -> str:
     """Set the audio of a video clip."""
     clip = get_clip(clip_id)
     audio = get_clip(audio_clip_id)
     return register_clip(clip.with_audio(audio))
 
 @mcp.tool
-def set_mask(clip_id: str, mask_clip_id: str) -> str:
+def set_mask(
+    clip_id: str,
+    mask_clip_id: str
+) -> str:
     """Set the mask of a clip."""
     clip = get_clip(clip_id)
     mask = get_clip(mask_clip_id)
     return register_clip(clip.with_mask(mask))
 
 @mcp.tool
-def set_start(clip_id: str, t: float) -> str:
+def set_start(
+    clip_id: str,
+    t: float
+) -> str:
     """Set clip start time."""
     clip = get_clip(clip_id)
     return register_clip(clip.with_start(t))
 
 @mcp.tool
-def set_end(clip_id: str, t: float) -> str:
+def set_end(
+    clip_id: str,
+    t: float
+) -> str:
     """Set clip end time."""
     clip = get_clip(clip_id)
     return register_clip(clip.with_end(t))
 
 @mcp.tool
-def set_duration(clip_id: str, t: float) -> str:
+def set_duration(
+    clip_id: str,
+    t: float
+) -> str:
     """Set clip duration."""
     clip = get_clip(clip_id)
     return register_clip(clip.with_duration(t))
@@ -444,7 +532,11 @@ def set_duration(clip_id: str, t: float) -> str:
 # --- Transformations & Compositing ---
 
 @mcp.tool
-def subclip(clip_id: str, start_time: float = 0, end_time: float = None) -> str:
+def subclip(
+    clip_id: str,
+    start_time: float = 0,
+    end_time: float = None
+) -> str:
     """Cut a clip."""
     clip = get_clip(clip_id)
     if end_time is not None and start_time >= end_time:
@@ -453,7 +545,12 @@ def subclip(clip_id: str, start_time: float = 0, end_time: float = None) -> str:
     return register_clip(new_clip)
 
 @mcp.tool
-def composite_video_clips(clip_ids: list[str], size: list[int] = None, bg_color: list[int] = None, use_bgclip: bool = False) -> str:
+def composite_video_clips(
+    clip_ids: list[str],
+    size: list[int] = None,
+    bg_color: list[int] = None,
+    use_bgclip: bool = False
+) -> str:
     """Compose multiple clips."""
     if not clip_ids:
         raise ValueError("At least one clip_id must be provided.")
@@ -467,7 +564,10 @@ def composite_video_clips(clip_ids: list[str], size: list[int] = None, bg_color:
     return register_clip(comp_clip)
 
 @mcp.tool
-def tools_clips_array(clip_ids_rows: list[list[str]], bg_color: list[int] = None) -> str:
+def tools_clips_array(
+    clip_ids_rows: list[list[str]],
+    bg_color: list[int] = None
+) -> str:
     """Arrange clips in a grid (array)."""
     if not clip_ids_rows or not any(clip_ids_rows):
         raise ValueError("clip_ids_rows cannot be empty.")
@@ -486,7 +586,11 @@ def tools_clips_array(clip_ids_rows: list[list[str]], bg_color: list[int] = None
     return register_clip(comp_clip)
 
 @mcp.tool
-def concatenate_video_clips(clip_ids: list[str], method: str = "chain", transition: str = None) -> str:
+def concatenate_video_clips(
+    clip_ids: list[str],
+    method: str = "chain",
+    transition: str = None
+) -> str:
     """Concatenate multiple clips."""
     if not clip_ids:
         raise ValueError("At least one clip_id must be provided.")
@@ -511,7 +615,12 @@ def concatenate_audio_clips(clip_ids: list[str]) -> str:
 # --- Video Effects ---
 
 @mcp.tool
-def vfx_accel_decel(clip_id: str, new_duration: float = None, abruptness: float = 1.0, soonness: float = 1.0) -> str:
+def vfx_accel_decel(
+    clip_id: str,
+    new_duration: float = None,
+    abruptness: float = 1.0,
+    soonness: float = 1.0
+) -> str:
     """Accelerate/Decelerate clip."""
     clip = get_clip(clip_id)
     return register_clip(clip.with_effects([vfx.AccelDecel(new_duration, abruptness, soonness)]))
@@ -523,25 +632,45 @@ def vfx_black_white(clip_id: str) -> str:
     return register_clip(clip.with_effects([vfx.BlackAndWhite()]))
 
 @mcp.tool
-def vfx_blink(clip_id: str, duration_on: float, duration_off: float) -> str:
+def vfx_blink(
+    clip_id: str,
+    duration_on: float,
+    duration_off: float
+) -> str:
     """Make clip blink."""
     clip = get_clip(clip_id)
     return register_clip(clip.with_effects([vfx.Blink(duration_on, duration_off)]))
 
 @mcp.tool
-def vfx_crop(clip_id: str, x1: int = None, y1: int = None, x2: int = None, y2: int = None, width: int = None, height: int = None, x_center: int = None, y_center: int = None) -> str:
+def vfx_crop(
+    clip_id: str,
+    x1: int = None,
+    y1: int = None,
+    x2: int = None,
+    y2: int = None,
+    width: int = None,
+    height: int = None,
+    x_center: int = None,
+    y_center: int = None
+) -> str:
     """Crop clip."""
     clip = get_clip(clip_id)
     return register_clip(clip.with_effects([vfx.Crop(x1, y1, x2, y2, width, height, x_center, y_center)]))
 
 @mcp.tool
-def vfx_cross_fade_in(clip_id: str, duration: float) -> str:
+def vfx_cross_fade_in(
+    clip_id: str,
+    duration: float
+) -> str:
     """Cross fade in."""
     clip = get_clip(clip_id)
     return register_clip(clip.with_effects([vfx.CrossFadeIn(duration)]))
 
 @mcp.tool
-def vfx_cross_fade_out(clip_id: str, duration: float) -> str:
+def vfx_cross_fade_out(
+    clip_id: str,
+    duration: float
+) -> str:
     """Cross fade out."""
     clip = get_clip(clip_id)
     return register_clip(clip.with_effects([vfx.CrossFadeOut(duration)]))
@@ -553,38 +682,65 @@ def vfx_even_size(clip_id: str) -> str:
     return register_clip(clip.with_effects([vfx.EvenSize()]))
 
 @mcp.tool
-def vfx_fade_in(clip_id: str, duration: float) -> str:
+def vfx_fade_in(
+    clip_id: str,
+    duration: float
+) -> str:
     """Fade in from black."""
     clip = get_clip(clip_id)
     return register_clip(clip.with_effects([vfx.FadeIn(duration)]))
 
 @mcp.tool
-def vfx_fade_out(clip_id: str, duration: float) -> str:
+def vfx_fade_out(
+    clip_id: str,
+    duration: float
+) -> str:
     """Fade out to black."""
     clip = get_clip(clip_id)
     return register_clip(clip.with_effects([vfx.FadeOut(duration)]))
 
 @mcp.tool
-def vfx_freeze(clip_id: str, t: float = 0, freeze_duration: float = None, total_duration: float = None, padding: float = 0) -> str:
+def vfx_freeze(
+    clip_id: str,
+    t: float = 0,
+    freeze_duration: float = None,
+    total_duration: float = None,
+    padding: float = 0
+) -> str:
     """Freeze a frame."""
     clip = get_clip(clip_id)
     return register_clip(clip.with_effects([vfx.Freeze(t, freeze_duration, total_duration, padding)]))
 
 @mcp.tool
-def vfx_freeze_region(clip_id: str, t: float = 0, region: list[int] = None, outside_region: list[int] = None, mask_clip_id: str = None) -> str:
+def vfx_freeze_region(
+    clip_id: str,
+    t: float = 0,
+    region: list[int] = None,
+    outside_region: list[int] = None,
+    mask_clip_id: str = None
+) -> str:
     """Freeze a region."""
     clip = get_clip(clip_id)
     mask = get_clip(mask_clip_id) if mask_clip_id else None
     return register_clip(clip.with_effects([vfx.FreezeRegion(t, tuple(region) if region else None, tuple(outside_region) if outside_region else None, mask)]))
 
 @mcp.tool
-def vfx_gamma_correction(clip_id: str, gamma: float) -> str:
+def vfx_gamma_correction(
+    clip_id: str,
+    gamma: float
+) -> str:
     """Gamma correction."""
     clip = get_clip(clip_id)
     return register_clip(clip.with_effects([vfx.GammaCorrection(gamma)]))
 
 @mcp.tool
-def vfx_head_blur(clip_id: str, fx_code: str, fy_code: str, radius: float, intensity: float = None) -> str:
+def vfx_head_blur(
+    clip_id: str,
+    fx_code: str,
+    fy_code: str,
+    radius: float,
+    intensity: float = None
+) -> str:
     """Blur moving head (requires math expressions for fx/fy positions, e.g., '100 + 50*t')."""
     def safe_eval_func(code):
         # Test once to see if it's a valid expression
@@ -599,50 +755,79 @@ def vfx_head_blur(clip_id: str, fx_code: str, fy_code: str, radius: float, inten
     return register_clip(clip.with_effects([vfx.HeadBlur(fx, fy, radius, intensity)]))
 
 @mcp.tool
-def vfx_invert_colors(clip_id: str) -> str:
+def vfx_invert_colors(
+    clip_id: str
+) -> str:
     """Invert colors."""
     clip = get_clip(clip_id)
     return register_clip(clip.with_effects([vfx.InvertColors()]))
 
 @mcp.tool
-def vfx_loop(clip_id: str, n: int = None, duration: float = None) -> str:
+def vfx_loop(
+    clip_id: str,
+    n: int = None,
+    duration: float = None
+) -> str:
     """Loop clip."""
     clip = get_clip(clip_id)
     return register_clip(clip.with_effects([vfx.Loop(n, duration)]))
 
 @mcp.tool
-def vfx_lum_contrast(clip_id: str, lum: float = 0, contrast: float = 0, contrast_threshold: float = 127) -> str:
+def vfx_lum_contrast(
+    clip_id: str,
+    lum: float = 0,
+    contrast: float = 0,
+    contrast_threshold: float = 127
+) -> str:
     """Luminosity contrast."""
     clip = get_clip(clip_id)
     return register_clip(clip.with_effects([vfx.LumContrast(lum, contrast, contrast_threshold)]))
 
 @mcp.tool
-def vfx_make_loopable(clip_id: str, overlap_duration: float) -> str:
+def vfx_make_loopable(
+    clip_id: str,
+    overlap_duration: float
+) -> str:
     """Make clip loopable with fade."""
     clip = get_clip(clip_id)
     return register_clip(clip.with_effects([vfx.MakeLoopable(overlap_duration)]))
 
 @mcp.tool
-def vfx_margin(clip_id: str, margin: int, color: list[int] = (0, 0, 0)) -> str:
+def vfx_margin(
+    clip_id: str,
+    margin: int,
+    color: list[int] = (0, 0, 0)
+) -> str:
     """Add margin."""
     clip = get_clip(clip_id)
     return register_clip(clip.with_effects([vfx.Margin(margin, color=tuple(color))]))
 
 @mcp.tool
-def vfx_mask_color(clip_id: str, color: list[int] = (0, 0, 0), threshold: float = 0, stiffness: float = 1) -> str:
+def vfx_mask_color(
+    clip_id: str,
+    color: list[int] = (0, 0, 0),
+    threshold: float = 0,
+    stiffness: float = 1
+) -> str:
     """Mask color."""
     clip = get_clip(clip_id)
     return register_clip(clip.with_effects([vfx.MaskColor(tuple(color), threshold, stiffness)]))
 
 @mcp.tool
-def vfx_masks_and(clip_id: str, other_clip_id: str) -> str:
+def vfx_masks_and(
+    clip_id: str,
+    other_clip_id: str
+) -> str:
     """Logical AND of masks."""
     clip = get_clip(clip_id)
     other = get_clip(other_clip_id)
     return register_clip(clip.with_effects([vfx.MasksAnd(other)]))
 
 @mcp.tool
-def vfx_masks_or(clip_id: str, other_clip_id: str) -> str:
+def vfx_masks_or(
+    clip_id: str,
+    other_clip_id: str
+) -> str:
     """Logical OR of masks."""
     clip = get_clip(clip_id)
     other = get_clip(other_clip_id)
@@ -661,31 +846,50 @@ def vfx_mirror_y(clip_id: str) -> str:
     return register_clip(clip.with_effects([vfx.MirrorY()]))
 
 @mcp.tool
-def vfx_multiply_color(clip_id: str, factor: float) -> str:
+def vfx_multiply_color(
+    clip_id: str,
+    factor: float
+) -> str:
     """Multiply color."""
     clip = get_clip(clip_id)
     return register_clip(clip.with_effects([vfx.MultiplyColor(factor)]))
 
 @mcp.tool
-def vfx_multiply_speed(clip_id: str, factor: float) -> str:
+def vfx_multiply_speed(
+    clip_id: str,
+    factor: float
+) -> str:
     """Multiply speed."""
     clip = get_clip(clip_id)
     return register_clip(clip.with_effects([vfx.MultiplySpeed(factor)]))
 
 @mcp.tool
-def vfx_painting(clip_id: str, saturation: float = 1.4, black: float = 0.006) -> str:
+def vfx_painting(
+    clip_id: str,
+    saturation: float = 1.4,
+    black: float = 0.006
+) -> str:
     """Painting effect."""
     clip = get_clip(clip_id)
     return register_clip(clip.with_effects([vfx.Painting(saturation, black)]))
 
 @mcp.tool
-def vfx_quad_mirror(clip_id: str, x: int = None, y: int = None) -> str:
+def vfx_quad_mirror(
+    clip_id: str,
+    x: int = None,
+    y: int = None
+) -> str:
     """Apply quad mirror effect with custom axes."""
     clip = get_clip(clip_id)
     return register_clip(clip.with_effects([QuadMirror(x, y)]))
 
 @mcp.tool
-def vfx_chroma_key(clip_id: str, color: list[int] = (0, 255, 0), threshold: float = 50, softness: float = 20) -> str:
+def vfx_chroma_key(
+    clip_id: str,
+    color: list[int] = (0, 255, 0),
+    threshold: float = 50,
+    softness: float = 20
+) -> str:
     """Apply an advanced Chroma Key effect to create transparency."""
     clip = get_clip(clip_id)
     return register_clip(clip.with_effects([ChromaKey(tuple(color), threshold, softness)]))
@@ -708,7 +912,12 @@ def vfx_rgb_sync(
     )]))
 
 @mcp.tool
-def vfx_kaleidoscope(clip_id: str, n_slices: int = 6, x: int = None, y: int = None) -> str:
+def vfx_kaleidoscope(
+    clip_id: str,
+    n_slices: int = 6,
+    x: int = None,
+    y: int = None
+) -> str:
     """Apply a kaleidoscope effect with radial symmetry."""
     clip = get_clip(clip_id)
     return register_clip(clip.with_effects([Kaleidoscope(n_slices, x, y)]))
@@ -727,13 +936,20 @@ def vfx_matrix(
     return register_clip(clip.with_effects([Matrix(speed, density, chars, color, font_size)]))
 
 @mcp.tool
-def vfx_auto_framing(clip_id: str, target_aspect_ratio: float = 9/16, smoothing: float = 0.9) -> str:
+def vfx_auto_framing(
+    clip_id: str,
+    target_aspect_ratio: float = 9/16,
+    smoothing: float = 0.9
+) -> str:
     """Automatically crops and centers the frame on a detected face or subject."""
     clip = get_clip(clip_id)
     return register_clip(clip.with_effects([AutoFraming(target_aspect_ratio, smoothing)]))
 
 @mcp.tool
-def vfx_clone_grid(clip_id: str, n_clones: int = 4) -> str:
+def vfx_clone_grid(
+    clip_id: str,
+    n_clones: int = 4
+) -> str:
     """Creates a grid of clones of the original clip (e.g., 2, 4, 8, 16, 32, 64)."""
     clip = get_clip(clip_id)
     return register_clip(clip.with_effects([CloneGrid(n_clones)]))
@@ -759,14 +975,22 @@ def vfx_rotating_cube(
 
 
 @mcp.tool
-def vfx_kaleidoscope_cube(clip_id: str, kaleidoscope_params: dict = None, cube_params: dict = None) -> str:
+def vfx_kaleidoscope_cube(
+    clip_id: str,
+    kaleidoscope_params: dict = None,
+    cube_params: dict = None
+) -> str:
     """Apply a KaleidoscopeCube effect."""
     clip = get_clip(clip_id)
     effect = KaleidoscopeCube(kaleidoscope_params=kaleidoscope_params, cube_params=cube_params)
     return register_clip(effect.apply(clip))
 
 @mcp.tool
-def vfx_typewriter(clip_id: str, chars_per_second: float = 10, delay: float = 0) -> str:
+def vfx_typewriter(
+    clip_id: str,
+    chars_per_second: float = 10,
+    delay: float = 0
+) -> str:
     """Apply a typewriter effect that reveals text one character at a time.
     
     Parameters:
@@ -839,9 +1063,11 @@ def vfx_glitch_mirror(
     qm_y: Optional[int] = None,
     factor: float = 1.2,
 ) -> str:
-    """Chain Matrix digital rain → RGB chromatic sync/split → quad mirror → color multiply in a single step.
+    """
+    Chain Matrix digital rain → RGB chromatic sync/split → quad mirror → color multiply in a single step.
     matrix_speed/density/color/chars/font_size control the rain; r/g/b_offset and time offsets control chromatic split;
-    qm_x/qm_y set the quad mirror center; factor brightens or dims the result."""
+    qm_x/qm_y set the quad mirror center; factor brightens or dims the result.
+    """
     clip = get_clip(clip_id)
     c1 = register_clip(clip.with_effects([Matrix(matrix_speed, matrix_density, chars, matrix_color, font_size)]))
     c2 = register_clip(get_clip(c1).with_effects([RGBSync(
@@ -853,7 +1079,12 @@ def vfx_glitch_mirror(
 
 
 @mcp.tool
-def vfx_resize(clip_id: str, width: int = None, height: int = None, scale: float = None) -> str:
+def vfx_resize(
+    clip_id: str,
+    width: int = None,
+    height: int = None,
+    scale: float = None
+) -> str:
     """Resize clip."""
     clip = get_clip(clip_id)
     if scale is not None:
@@ -869,31 +1100,57 @@ def vfx_resize(clip_id: str, width: int = None, height: int = None, scale: float
     return register_clip(clip.with_effects([effect]))
 
 @mcp.tool
-def vfx_rotate(clip_id: str, angle: float, unit: str = "deg", resample: str = "bicubic", expand: bool = True) -> str:
+def vfx_rotate(
+    clip_id: str,
+    angle: float,
+    unit: str = "deg",
+    resample: str = "bicubic",
+    expand: bool = True
+) -> str:
     """Rotate clip."""
     clip = get_clip(clip_id)
     return register_clip(clip.with_effects([vfx.Rotate(angle, unit=unit, resample=resample, expand=expand)]))
 
 @mcp.tool
-def vfx_scroll(clip_id: str, w: int = None, h: int = None, x_speed: float = 0, y_speed: float = 0, x_start: float = 0, y_start: float = 0) -> str:
+def vfx_scroll(
+    clip_id: str,
+    w: int = None,
+    h: int = None,
+    x_speed: float = 0,
+    y_speed: float = 0,
+    x_start: float = 0,
+    y_start: float = 0
+) -> str:
     """Scroll clip."""
     clip = get_clip(clip_id)
     return register_clip(clip.with_effects([vfx.Scroll(w, h, x_speed, y_speed, x_start, y_start)]))
 
 @mcp.tool
-def vfx_slide_in(clip_id: str, duration: float, side: str) -> str:
+def vfx_slide_in(
+    clip_id: str,
+    duration: float,
+    side: str
+) -> str:
     """Slide in."""
     clip = get_clip(clip_id)
     return register_clip(clip.with_effects([vfx.SlideIn(duration, side)]))
 
 @mcp.tool
-def vfx_slide_out(clip_id: str, duration: float, side: str) -> str:
+def vfx_slide_out(
+    clip_id: str,
+    duration: float,
+    side: str
+) -> str:
     """Slide out."""
     clip = get_clip(clip_id)
     return register_clip(clip.with_effects([vfx.SlideOut(duration, side)]))
 
 @mcp.tool
-def vfx_supersample(clip_id: str, d: float, nframes: int) -> str:
+def vfx_supersample(
+    clip_id: str,
+    d: float,
+    nframes: int
+) -> str:
     """Supersample."""
     clip = get_clip(clip_id)
     return register_clip(clip.with_effects([vfx.SuperSample(d, nframes)]))
@@ -913,25 +1170,40 @@ def vfx_time_symmetrize(clip_id: str) -> str:
 # --- Audio Effects ---
 
 @mcp.tool
-def afx_audio_delay(clip_id: str, offset: float = 0.2, n_repeats: int = 8, decay: float = 1) -> str:
+def afx_audio_delay(
+    clip_id: str,
+    offset: float = 0.2,
+    n_repeats: int = 8,
+    decay: float = 1
+) -> str:
     """Audio delay."""
     clip = get_clip(clip_id)
     return register_clip(clip.with_effects([afx.AudioDelay(offset, n_repeats, decay)]))
 
 @mcp.tool
-def afx_audio_fade_in(clip_id: str, duration: float) -> str:
+def afx_audio_fade_in(
+    clip_id: str,
+    duration: float
+) -> str:
     """Audio fade in."""
     clip = get_clip(clip_id)
     return register_clip(clip.with_effects([afx.AudioFadeIn(duration)]))
 
 @mcp.tool
-def afx_audio_fade_out(clip_id: str, duration: float) -> str:
+def afx_audio_fade_out(
+    clip_id: str,
+    duration: float
+) -> str:
     """Audio fade out."""
     clip = get_clip(clip_id)
     return register_clip(clip.with_effects([afx.AudioFadeOut(duration)]))
 
 @mcp.tool
-def afx_audio_loop(clip_id: str, n_loops: int = None, duration: float = None) -> str:
+def afx_audio_loop(
+    clip_id: str,
+    n_loops: int = None,
+    duration: float = None
+) -> str:
     """Audio loop."""
     clip = get_clip(clip_id)
     return register_clip(clip.with_effects([afx.AudioLoop(n_loops, duration)]))
@@ -943,13 +1215,20 @@ def afx_audio_normalize(clip_id: str) -> str:
     return register_clip(clip.with_effects([afx.AudioNormalize()]))
 
 @mcp.tool
-def afx_multiply_stereo_volume(clip_id: str, left: float = 1, right: float = 1) -> str:
+def afx_multiply_stereo_volume(
+    clip_id: str,
+    left: float = 1,
+    right: float = 1
+) -> str:
     """Multiply stereo volume."""
     clip = get_clip(clip_id)
     return register_clip(clip.with_effects([afx.MultiplyStereoVolume(left, right)]))
 
 @mcp.tool
-def afx_multiply_volume(clip_id: str, factor: float) -> str:
+def afx_multiply_volume(
+    clip_id: str,
+    factor: float
+) -> str:
     """Multiply volume."""
     clip = get_clip(clip_id)
     return register_clip(clip.with_effects([afx.MultiplyVolume(factor)]))
@@ -957,20 +1236,34 @@ def afx_multiply_volume(clip_id: str, factor: float) -> str:
 # --- Tools ---
 
 @mcp.tool
-def tools_detect_scenes(clip_id: str, luminosity_threshold: int = 10) -> list:
+def tools_detect_scenes(
+    clip_id: str,
+    luminosity_threshold: int = 10
+) -> list:
     """Detect scenes in a clip. Returns list of timestamps."""
     clip = get_clip(clip_id)
     cuts, luminosities = detect_scenes(clip, luminosity_threshold=luminosity_threshold)
     return [[float(start), float(end)] for start, end in cuts]
 
 @mcp.tool
-def tools_find_video_period(clip_id: str, start_time: float = 0.0) -> float:
+def tools_find_video_period(
+    clip_id: str,
+    start_time: float = 0.0
+) -> float:
     """Find video period."""
     clip = get_clip(clip_id)
     return float(find_video_period(clip, start_time=start_time))
 
 @mcp.tool
-def tools_drawing_color_gradient(size: list[int], p1: list[int], p2: list[int], col1: list[int], col2: list[int], shape: str = "linear", offset: float = 0) -> str:
+def tools_drawing_color_gradient(
+    size: list[int],
+    p1: list[int],
+    p2: list[int],
+    col1: list[int],
+    col2: list[int],
+    shape: str = "linear",
+    offset: float = 0
+) -> str:
     """Create a color gradient image clip."""
     img = color_gradient(
         size=tuple(size),
@@ -985,7 +1278,16 @@ def tools_drawing_color_gradient(size: list[int], p1: list[int], p2: list[int], 
     return register_clip(clip)
 
 @mcp.tool
-def tools_drawing_color_split(size: list[int], x: int, y: int, p1: list[int], p2: list[int], col1: list[int], col2: list[int], grad_width: int = 0) -> str:
+def tools_drawing_color_split(
+    size: list[int],
+    x: int,
+    y: int,
+    p1: list[int],
+    p2: list[int],
+    col1: list[int],
+    col2: list[int],
+    grad_width: int = 0
+) -> str:
     """Create a color split image clip."""
     img = color_split(
         size=tuple(size),
@@ -1001,7 +1303,10 @@ def tools_drawing_color_split(size: list[int], x: int, y: int, p1: list[int], p2
     return register_clip(clip)
 
 @mcp.tool
-def tools_file_to_subtitles(filename: str, encoding: str = "utf-8") -> list:
+def tools_file_to_subtitles(
+    filename: str,
+    encoding: str = "utf-8"
+) -> list:
     """Convert subtitle file to list of (start, end, text)."""
     filename = validate_path(filename)
     if not os.path.exists(filename):
@@ -1011,7 +1316,8 @@ def tools_file_to_subtitles(filename: str, encoding: str = "utf-8") -> list:
 
 @mcp.resource("fonts://list")
 def list_fonts_resource() -> str:
-    """List all available fonts in the fonts directory as JSON.
+    """
+    List all available fonts in the fonts directory as JSON.
     Use this resource to discover font filenames for use in text clips.
     """
     import json
@@ -1026,12 +1332,12 @@ def list_fonts_resource() -> str:
 
 @mcp.resource("fonts://{font_name}")
 def get_font_resource(font_name: str) -> str:
-    """Get metadata and absolute path for a specific font.
+    """
+    Get metadata and absolute path for a specific font.
     Args:
         font_name: The filename of the font (e.g., 'Lobster.otf')
     """
-    import json
-    fonts_dir = os.path.join(os.getcwd(), "fonts")
+    fonts_dir = FONT_PATH
     font_path = os.path.join(fonts_dir, font_name)
     
     if not os.path.exists(font_path) or not font_name.lower().endswith(('.ttf', '.otf')):
@@ -1051,10 +1357,11 @@ def get_font_resource(font_name: str) -> str:
 
 @mcp.tool
 def list_available_fonts() -> list[str]:
-    """List all available fonts in the fonts directory.
+    """
+    List all available fonts in the fonts directory.
     Note: It is recommended to use the 'fonts://list' resource instead.
     """
-    fonts_dir = os.path.join(os.getcwd(), "fonts")
+    fonts_dir = FONT_PATH
     if not os.path.exists(fonts_dir):
         return []
     try:
@@ -1171,8 +1478,10 @@ def slideshow_wizard(
     resolution: list[int] = Field(default=[1920, 1080], description="Video resolution [width, height]"),
     fps: int = Field(default=30, description="Frame rate of the output video")
 ) -> str:
-    """Generates a professional slideshow from images with random transitions and text overlays.
-    Transitions are randomly selected from: fade, slide, and zoom."""
+    """
+    Generates a professional slideshow from images with random transitions and text overlays.
+    Transitions are randomly selected from: fade, slide, and zoom.
+    """
     return (
         f"Create a {resolution[0]}x{resolution[1]} slideshow at {fps} fps using {len(images)} images. "
         f"Each image should display for {duration_per_image} seconds. "
@@ -1192,8 +1501,10 @@ def title_card_generator(
     duration: float = Field(default=3.0, description="Duration of the title card in seconds"),
     resolution: list[int] = Field(default=[1920, 1080], description="Resolution of the title card [width, height]")
 ) -> str:
-    """Creates a title card with text on a solid color background.
-    Perfect for introductions or chapter headers."""
+    """
+    Creates a title card with text on a solid color background.
+    Perfect for introductions or chapter headers.
+    """
     return (
         f"Create a {resolution[0]}x{resolution[1]} title card with background color {bg_color}. "
         f"Display the text '{text}' for {duration} seconds using font '{font_file}' "
@@ -1216,8 +1527,10 @@ def demonstrate_kaleidoscope_cube(
 
 @mcp.prompt
 def typewriter_demo() -> str:
-    """Interactive typewriter workflow: list_available_fonts, collects user choices,
-    then creates a text clip, applies the typewriter effect, and returns a download URL."""
+    """
+    Interactive typewriter workflow: list_available_fonts, collects user choices,
+    then creates a text clip, applies the typewriter effect, and returns a download URL.
+    """
 
     def _typewriter_apply(text: str, font: str, font_size: int, color: str, output_filename: str = "typewriter_output.mp4") -> str:
         return (
@@ -1239,6 +1552,7 @@ def typewriter_demo() -> str:
     )
 
 # Add the transform - creates list_prompts and get_prompt tools
+# Add the transform - creates list_resources and get_resource tools
 mcp.add_transform(PromptsAsTools(mcp))
 mcp.add_transform(ResourcesAsTools(mcp))
 
@@ -1247,11 +1561,11 @@ mcp.add_transform(ResourcesAsTools(mcp))
 # Session state: maps session_id -> absolute server path (None = still pending)
 UPLOAD_SESSIONS: dict = {}
 
-SERVER_BASE_URL = os.getenv("SERVER_BASE_URL", "https://vidmagik-mcp.fly.dev")
 
 @mcp.tool
 def request_file_upload() -> str:
-    """Start a browser-based file upload session and return the upload page URL.
+    """
+    Start a browser-based file upload session and return the upload page URL.
 
     AGENT INSTRUCTIONS:
     1. Call this tool to get a unique upload URL.
@@ -1276,7 +1590,8 @@ def request_file_upload() -> str:
 
 @mcp.tool
 def get_uploaded_file(session_id: str) -> str:
-    """Retrieve the server-side file path after a browser upload completes.
+    """
+    Retrieve the server-side file path after a browser upload completes.
 
     Call this after the /upload-ui page shows a success confirmation.
     The returned path can be passed directly to video_file_clip(), image_clip(), etc.
@@ -1303,7 +1618,8 @@ def get_uploaded_file(session_id: str) -> str:
 from starlette.requests import Request
 from starlette.responses import JSONResponse, HTMLResponse, Response
 
-_UPLOAD_UI_HTML = """<!DOCTYPE html>
+_UPLOAD_UI_HTML = """
+<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -1497,7 +1813,8 @@ async def handle_upload(request: Request):
 
 @mcp.custom_route("/download", methods=["GET"])
 async def handle_download(request: Request):
-    """Download a file from the server by filename.
+    """
+    Download a file from the server by filename.
 
     Query params:
         file: filename or absolute path (e.g. grid_output.mp4 or /app/grid_output.mp4)
@@ -1533,7 +1850,8 @@ async def handle_download(request: Request):
 
 @mcp.tool
 def get_download_url(filename: str) -> str:
-    """Get the public download URL for a file written by write_videofile().
+    """
+    Get the public download URL for a file written by write_videofile().
 
     Call this immediately after write_videofile(). Returns the full URL the user
     can paste directly into their browser to trigger an automatic download.
@@ -1549,6 +1867,8 @@ def get_download_url(filename: str) -> str:
 
     if not os.path.isfile(abs_path):
         raise ValueError(f"File not found: {abs_path}")
+    
+    return f"{ROOT_URL}/download?file={basename}"
 
 
 # Configure with EventStore for resumability and build the ASGI app
