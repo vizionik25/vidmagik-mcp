@@ -34,3 +34,6 @@ decode_b64.py
 
 # OS
 .DS_Store
+
+# Environment variables
+.env
