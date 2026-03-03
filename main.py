@@ -1883,7 +1883,7 @@ routes = []
 if hasattr(mcp, "auth") and mcp.auth:
     routes.extend(mcp.auth.get_well_known_routes(mcp_path=MCP_PATH))
 
-routes.append(Mount(MOUNT_PREFIX or "/", app=mcp_app))
+routes.append(Mount(app=mcp_app))
 
 app = Starlette(
     routes=routes,
